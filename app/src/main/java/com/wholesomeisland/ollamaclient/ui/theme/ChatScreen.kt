@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -33,13 +34,22 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.halilibo.richtext.markdown.Markdown
+import com.halilibo.richtext.ui.CodeBlockStyle
+import com.halilibo.richtext.ui.RichTextStyle
 import com.halilibo.richtext.ui.material3.RichText
 import kotlinx.coroutines.launch
 import java.net.URL
@@ -104,7 +114,7 @@ fun ChatScreen(
                         "3. Future-Proof Web Search & Agentic Tools\n" +
                         "The App includes a \"Web Search\" feature utilizing Jsoup to retrieve real-time information via DuckDuckGo.\n" +
                         "• Knowledge Retrieval: This feature is designed to \"future-proof\" your local models by bridging the gap between their training cutoff and current events.\n" +
-                        "• Third-Party Data: Search queries are processed directly via DuckDuckGo. By using this feature, you acknowledge that your search queries are subject to DuckDuckGo’s privacy standards.\n" +
+                        "• Third-Party Data: Search queries are processed directly via DuckDuckGo. By using this feature, you acknowledge that your search queries pulling from DuckDuckGo’s privacy standards.\n" +
                         "• No Warranty on Results: The developer is not responsible for the accuracy of web search results or the AI's interpretation of that data.\n\n" +
                         "4. Privacy & Data Integrity\n" +
                         "• No Middleware: Communication occurs directly between your mobile device and your Ollama server. No chat data, system prompts, or images are ever transmitted to the App developer.\n" +
@@ -162,6 +172,7 @@ fun ChatScreen(
                                     .size(10.dp)
                                     .clip(CircleShape)
                                     .background(statusColor)
+                                    .semantics { contentDescription = "Server status indicator" }
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
@@ -178,26 +189,66 @@ fun ChatScreen(
                     
                     Spacer(Modifier.height(24.dp))
 
-                    var urlInput by remember { mutableStateOf(state.serverUrl) }
-                    OutlinedTextField(
-                        value = urlInput,
-                        onValueChange = { urlInput = it },
-                        label = { Text("Server URL") },
+                    var ipInput by remember { mutableStateOf(state.serverUrl.removePrefix("http://").substringBeforeLast(":")) }
+                    var portInput by remember { mutableStateOf(state.serverUrl.substringAfterLast(":", "11434")) }
+                    
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = ipInput,
+                            onValueChange = { newValue ->
+                                if (newValue.all { it.isDigit() || it == '.' }) {
+                                    ipInput = newValue
+                                }
+                            },
+                            label = { Text("IP Address") },
+                            placeholder = { Text("192.168.1.5") },
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = purple,
+                                unfocusedBorderColor = Color.DarkGray,
+                                focusedLabelColor = purple,
+                                unfocusedLabelColor = Color.Gray,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            )
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedTextField(
+                            value = portInput,
+                            onValueChange = { newValue ->
+                                if (newValue.all { it.isDigit() } && newValue.length <= 5) {
+                                    portInput = newValue
+                                }
+                            },
+                            label = { Text("Port") },
+                            modifier = Modifier.width(100.dp),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = purple,
+                                unfocusedBorderColor = Color.DarkGray,
+                                focusedLabelColor = purple,
+                                unfocusedLabelColor = Color.Gray,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            )
+                        )
+                    }
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Button(
+                        onClick = { 
+                            val finalPort = if (portInput.isBlank()) "11434" else portInput
+                            onChangeServerUrl("http://$ipInput:$finalPort") 
+                        },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = purple,
-                            unfocusedBorderColor = Color.DarkGray,
-                            focusedLabelColor = purple,
-                            unfocusedLabelColor = Color.Gray,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        trailingIcon = {
-                            IconButton(onClick = { onChangeServerUrl(urlInput) }) {
-                                Icon(Icons.Default.Check, contentDescription = "Update URL", tint = Color.White)
-                            }
-                        }
-                    )
+                        colors = ButtonDefaults.buttonColors(containerColor = purple)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = "Confirm server connection")
+                        Spacer(Modifier.width(8.dp))
+                        Text("Connect Server")
+                    }
 
                     Spacer(Modifier.height(24.dp))
 
@@ -214,7 +265,8 @@ fun ChatScreen(
                                 checkedTrackColor = purple.copy(alpha = 0.5f),
                                 uncheckedThumbColor = lightGray,
                                 uncheckedTrackColor = darkGray
-                            )
+                            ),
+                            modifier = Modifier.semantics { contentDescription = "Enable or disable real-time web search" }
                         )
                     }
 
@@ -233,7 +285,8 @@ fun ChatScreen(
                                 checkedTrackColor = purple.copy(alpha = 0.5f),
                                 uncheckedThumbColor = lightGray,
                                 uncheckedTrackColor = darkGray
-                            )
+                            ),
+                            modifier = Modifier.semantics { contentDescription = "Enable or disable real-time response streaming" }
                         )
                     }
 
@@ -247,7 +300,8 @@ fun ChatScreen(
                             thumbColor = purple,
                             activeTrackColor = purple,
                             inactiveTrackColor = Color.DarkGray
-                        )
+                        ),
+                        modifier = Modifier.semantics { contentDescription = "Adjust model verbosity from brief to detailed" }
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -273,7 +327,7 @@ fun ChatScreen(
                                     onSelectModel(model)
                                     scope.launch { drawerState.close() }
                                 },
-                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding).semantics { contentDescription = "Select AI model $model" },
                                 colors = NavigationDrawerItemDefaults.colors(
                                     selectedContainerColor = purple.copy(alpha = 0.1f),
                                     unselectedContainerColor = Color.Transparent,
@@ -298,7 +352,7 @@ fun ChatScreen(
                             unselectedContainerColor = Color(0xFF333333).copy(alpha = 0.5f),
                             unselectedTextColor = Color.White
                         ),
-                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding).semantics { contentDescription = "Support the developer via Buy Me a Coffee" }
                     )
 
                     Spacer(Modifier.height(8.dp))
@@ -312,7 +366,7 @@ fun ChatScreen(
                             unselectedContainerColor = Color.Transparent,
                             unselectedTextColor = Color.Gray
                         ),
-                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding).semantics { contentDescription = "View the source code on GitHub" }
                     )
 
                     Spacer(Modifier.height(8.dp))
@@ -326,7 +380,7 @@ fun ChatScreen(
                             unselectedContainerColor = Color.Transparent,
                             unselectedTextColor = Color.Gray
                         ),
-                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding).semantics { contentDescription = "Open the Terms of Service dialog" }
                     )
 
                     Spacer(Modifier.height(32.dp))
@@ -351,12 +405,13 @@ fun ChatScreen(
                 TopAppBar(
                     title = {
                         Column {
-                            Text("Wholesome Island", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("Wholesome Island 🌴", color = Color.White, fontWeight = FontWeight.Bold)
                             if (state.selectedModel != null) {
                                 Text(
                                     state.selectedModel,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.semantics { contentDescription = "Active model: ${state.selectedModel}" }
                                 )
                             }
                         }
@@ -368,7 +423,7 @@ fun ChatScreen(
                     ),
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "Settings")
+                            Icon(Icons.Default.Menu, contentDescription = "Open settings menu")
                         }
                     }
                 )
@@ -392,7 +447,8 @@ fun ChatScreen(
                                     },
                                     label = { Text(action.label, color = Color.White) },
                                     border = null,
-                                    colors = SuggestionChipDefaults.suggestionChipColors(containerColor = Color(0xFF333333))
+                                    colors = SuggestionChipDefaults.suggestionChipColors(containerColor = Color(0xFF333333)),
+                                    modifier = Modifier.semantics { contentDescription = "Quick action: ${action.label}" }
                                 )
                             }
                         }
@@ -408,7 +464,9 @@ fun ChatScreen(
                         if (state.isLoading || state.isSearching) {
                             item {
                                 Row(
-                                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                                    modifier = Modifier.padding(16.dp).fillMaxWidth().semantics(mergeDescendants = true) {
+                                        liveRegion = LiveRegionMode.Polite
+                                    },
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     CircularProgressIndicator(
@@ -439,7 +497,7 @@ fun ChatScreen(
                                     ) {
                                         Icon(
                                             Icons.Default.StopCircle,
-                                            contentDescription = "Cancel",
+                                            contentDescription = "Cancel current AI request",
                                             tint = Color.DarkGray,
                                             modifier = Modifier.size(18.dp)
                                         )
@@ -480,7 +538,7 @@ fun ChatScreen(
                                     bitmap?.let {
                                         Image(
                                             bitmap = it.asImageBitmap(),
-                                            contentDescription = null,
+                                            contentDescription = "User attached image",
                                             modifier = Modifier
                                                 .size(80.dp)
                                                 .clip(RoundedCornerShape(4.dp)),
@@ -494,7 +552,7 @@ fun ChatScreen(
                                             .align(Alignment.TopEnd)
                                             .background(Color.Black.copy(alpha = 0.6f), CircleShape)
                                     ) {
-                                        Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                        Icon(Icons.Default.Close, contentDescription = "Remove attached image", tint = Color.White, modifier = Modifier.size(12.dp))
                                     }
                                 }
                             }
@@ -510,7 +568,7 @@ fun ChatScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(onClick = onPickImage) {
-                            Icon(Icons.Default.Image, contentDescription = null, tint = Color.Gray)
+                            Icon(Icons.Default.Image, contentDescription = "Attach an image to your message", tint = Color.Gray)
                         }
                         TextField(
                             value = input,
@@ -525,7 +583,8 @@ fun ChatScreen(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
                                 cursorColor = MaterialTheme.colorScheme.primary
-                            )
+                            ),
+                            label = { Text("Chat message") }
                         )
                         IconButton(
                             onClick = {
@@ -538,7 +597,7 @@ fun ChatScreen(
                             },
                             enabled = !state.isLoading
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, tint = if (input.isNotBlank()) MaterialTheme.colorScheme.primary else Color.DarkGray)
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send message to AI", tint = if (input.isNotBlank()) MaterialTheme.colorScheme.primary else Color.DarkGray)
                         }
                     }
                 }
@@ -552,7 +611,7 @@ fun ChatScreen(
                     Card(
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF333333)),
                         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Announcement: ${state.infoMessage}" }
                     ) {
                         Row(
                             modifier = Modifier.padding(12.dp),
@@ -560,7 +619,7 @@ fun ChatScreen(
                         ) {
                             Text(text = state.infoMessage ?: "", color = Color.White, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                             IconButton(onClick = onDismissInfo, modifier = Modifier.size(24.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Close, contentDescription = "Dismiss announcement", tint = Color.Gray, modifier = Modifier.size(16.dp))
                             }
                         }
                     }
@@ -575,7 +634,7 @@ fun ChatScreen(
                     Card(
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF422222)),
                         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Error alert: ${state.error}" }
                     ) {
                         Row(
                             modifier = Modifier.padding(12.dp),
@@ -583,7 +642,7 @@ fun ChatScreen(
                         ) {
                             Text(text = state.error ?: "", color = Color(0xFFFFB4AB), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                             IconButton(onClick = onDismissError) {
-                                Icon(Icons.Default.Close, contentDescription = null, tint = Color(0xFFFFB4AB))
+                                Icon(Icons.Default.Close, contentDescription = "Dismiss error message", tint = Color(0xFFFFB4AB))
                             }
                         }
                     }
@@ -604,7 +663,6 @@ fun ResponseBlock(
 ) {
     val isUser = message.role == "user"
     val clipboardManager = LocalClipboardManager.current
-    var showMenu by remember { mutableStateOf(false) }
 
     Surface(
         color = if (isUser) Color.Transparent else aiBackground,
@@ -612,8 +670,8 @@ fun ResponseBlock(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp, horizontal = 8.dp)
-            .pointerInput(Unit) {
-                detectTapGestures(onLongPress = { showMenu = true })
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (isUser) "Your message: ${message.text}" else "AI response: ${message.text}"
             }
     ) {
         Column(
@@ -623,7 +681,9 @@ fun ResponseBlock(
                 Surface(
                     color = Color.White.copy(alpha = 0.05f),
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.padding(bottom = 12.dp)
+                    modifier = Modifier.padding(bottom = 12.dp).semantics(mergeDescendants = true) { 
+                        contentDescription = "AI thinking process: ${message.reasoning}" 
+                    }
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(text = "Thought", style = MaterialTheme.typography.labelSmall, color = accentColor, fontWeight = FontWeight.Bold)
@@ -646,7 +706,7 @@ fun ResponseBlock(
                     bitmap?.let {
                         Image(
                             bitmap = it.asImageBitmap(),
-                            contentDescription = null,
+                            contentDescription = "Attached image in conversation",
                             modifier = Modifier
                                 .padding(bottom = 12.dp)
                                 .sizeIn(maxWidth = 400.dp, maxHeight = 400.dp)
@@ -669,39 +729,59 @@ fun ResponseBlock(
                         )
                     }
                 } else {
-                    RichText {
+                    RichText(
+                        style = RichTextStyle(
+                            codeBlockStyle = CodeBlockStyle(
+                                textStyle = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color.LightGray
+                                ),
+                                modifier = Modifier
+                                    .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                                    .padding(8.dp)
+                            )
+                        )
+                    ) {
                         Markdown(content = message.text)
                     }
                 }
             }
 
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = { showMenu = false },
-                modifier = Modifier.background(Color(0xFF333333))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.End
             ) {
                 if (isUser) {
-                    DropdownMenuItem(
-                        text = { Text("Try Again", color = Color.White) },
-                        onClick = { onTryAgain(message.text); showMenu = false },
-                        leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Gray) }
-                    )
+                    IconButton(onClick = { onTryAgain(message.text) }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Resend this message to the AI", tint = Color.Gray, modifier = Modifier.size(18.dp))
+                    }
                 }
-                DropdownMenuItem(
-                    text = { Text("Copy", color = Color.White) },
-                    onClick = { clipboardManager.setText(AnnotatedString(message.text)); showMenu = false },
-                    leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Gray) }
-                )
-                DropdownMenuItem(
-                    text = { Text("Share", color = Color.White) },
-                    onClick = { onShare(message.text); showMenu = false },
-                    leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = Color.Gray) }
-                )
-                DropdownMenuItem(
-                    text = { Text("Delete", color = Color.White) },
-                    onClick = { onDelete(); showMenu = false },
-                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Gray) }
-                )
+                IconButton(onClick = { 
+                    // Improved copy logic to strip markdown ticks if requested
+                    val textToCopy = if (message.text.contains("```")) {
+                        // Extract content between triple backticks if present
+                        val regex = "```(?:[a-zA-Z]*\\n)?([\\s\\S]*?)```".toRegex()
+                        val matches = regex.findAll(message.text)
+                        if (matches.any()) {
+                            matches.joinToString("\n\n") { it.groupValues[1].trim() }
+                        } else {
+                            message.text
+                        }
+                    } else {
+                        message.text
+                    }
+                    clipboardManager.setText(AnnotatedString(textToCopy)) 
+                }) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy code or message text to clipboard", tint = Color.Gray, modifier = Modifier.size(18.dp))
+                }
+                IconButton(onClick = { onShare(message.text) }) {
+                    Icon(Icons.Default.Share, contentDescription = "Share message text", tint = Color.Gray, modifier = Modifier.size(18.dp))
+                }
+                IconButton(onClick = { onDelete() }) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete this message", tint = Color.Gray, modifier = Modifier.size(18.dp))
+                }
             }
         }
     }

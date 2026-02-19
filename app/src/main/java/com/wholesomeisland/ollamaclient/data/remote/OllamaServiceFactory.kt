@@ -1,5 +1,6 @@
 package com.wholesomeisland.ollamaclient.data.remote
 
+import com.wholesomeisland.ollamaclient.BuildConfig
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.OkHttpClient
@@ -15,9 +16,13 @@ object OllamaServiceFactory {
     private fun getClient(): OkHttpClient {
         return sharedClient ?: synchronized(this) {
             sharedClient ?: OkHttpClient.Builder()
-                // Use HEADERS or BASIC for speed. BODY level buffers everything and adds huge latency.
                 .addInterceptor(HttpLoggingInterceptor().apply {
-                    level = HttpLoggingInterceptor.Level.HEADERS 
+                    // Only log headers in debug mode. No logging in release for privacy/security.
+                    level = if (BuildConfig.DEBUG) {
+                        HttpLoggingInterceptor.Level.HEADERS
+                    } else {
+                        HttpLoggingInterceptor.Level.NONE
+                    }
                 })
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)

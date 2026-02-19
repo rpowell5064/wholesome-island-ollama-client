@@ -2,20 +2,6 @@
 
 Wholesome Island is a high-performance, private, and efficient Android client for local Large Language Models (LLMs) via **Ollama**. It is designed with a focus on real-time information retrieval and model efficiency.
 
-## 🚀 The PRINCIPAL Methodology
-
-This application is built using the **PRINCIPAL** design pattern for LLM integration:
-
-- **P**ersistent Context: Maintains conversation history with state management.
-- **R**eal-time Integration: Live web search via DuckDuckGo and Jsoup scraping.
-- **I**ncremental Streaming: Real-time character-by-character response delivery.
-- **N**ative Performance: Optimized for local execution with reduced protocol overhead.
-- **C**ontext Windowing: Automatic history and vision token management to prevent slowdowns.
-- **I**ntent Detection: Seamless switching between conversational mode and tool-use (web search).
-- **P**rompt Engineering: Strict system-level instructions to minimize hallucinations.
-- **A**synchronous Lifecycle: Fully non-blocking UI using Kotlin Coroutines and Flow.
-- **L**ocal First: Prioritizes privacy by communicating with your local Ollama instance.
-
 ## ✨ Key Features
 
 - **Real-Time Web Search**: Automatically searches the web for current events (e.g., "Who won the Super Bowl in 2026?") and synthesizes the results.

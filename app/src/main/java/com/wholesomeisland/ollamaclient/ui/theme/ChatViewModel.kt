@@ -50,7 +50,7 @@ data class QuickAction(
  * State representing the entire Chat Screen UI.
  */
 data class ChatUiState(
-    val serverUrl: String = ChatConstants.DEFAULT_SERVER_URL,
+    val serverUrl: String = "",
     val availableModels: List<String> = emptyList(),
     val selectedModel: String? = null,
     val messages: List<ChatUiMessage> = emptyList(),
@@ -85,7 +85,7 @@ private class ToolCallHandledException(
 
 /**
  * ViewModel for the Wholesome Island chat interface.
- * Implements the PRINCIPAL methodology for efficient local LLM integration.
+ * Handles efficient local LLM integration and real-time web search.
  */
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -104,7 +104,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         .build()
 
     private val _uiState = MutableStateFlow(ChatUiState(
-        serverUrl = prefs.getString("server_url", ChatConstants.DEFAULT_SERVER_URL) ?: ChatConstants.DEFAULT_SERVER_URL
+        serverUrl = prefs.getString("server_url", "") ?: "",
+        selectedModel = prefs.getString("selected_model", null),
+        isWebSearchEnabled = prefs.getBoolean("web_search_enabled", true),
+        isStreamingEnabled = prefs.getBoolean("streaming_enabled", true),
+        verbosity = prefs.getFloat("verbosity", 0.5f)
     ))
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
@@ -116,14 +120,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Shows the initial onboarding/info message.
+     * Shows the initial onboarding/info message or model selection reminder.
      */
     private fun showStartupNotification() {
-        _uiState.update { it.copy(infoMessage = "Web Search & Streaming are on by default.") }
-        infoTimerJob?.cancel()
-        infoTimerJob = viewModelScope.launch {
-            delay(5000)
-            _uiState.update { it.copy(infoMessage = null) }
+        val state = _uiState.value
+        when {
+            state.serverUrl.isBlank() || !state.serverUrl.startsWith("http") -> {
+                _uiState.update { it.copy(infoMessage = "Welcome! Please enter your Ollama server address in settings.") }
+            }
+            state.selectedModel == null -> {
+                _uiState.update { it.copy(infoMessage = "Server connected! Now select a model in settings to start.") }
+            }
+            else -> {
+                _uiState.update { it.copy(infoMessage = "Ready to chat.") }
+                infoTimerJob?.cancel()
+                infoTimerJob = viewModelScope.launch {
+                    delay(5000)
+                    _uiState.update { it.copy(infoMessage = null) }
+                }
+            }
         }
     }
 
@@ -131,8 +146,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * Re-initializes the Ollama repository with a new base URL.
      */
     private fun updateRepository(url: String) {
-        repository = OllamaRepository(OllamaServiceFactory.create(url))
-        checkHealthAndLoadModels()
+        if (url.isBlank() || !url.startsWith("http")) {
+            repository = null
+            _uiState.update { it.copy(isServerHealthy = null) }
+            return
+        }
+        
+        try {
+            repository = OllamaRepository(OllamaServiceFactory.create(url))
+            checkHealthAndLoadModels()
+        } catch (e: Exception) {
+            repository = null
+            _uiState.update { it.copy(isServerHealthy = false, error = "Invalid server URL format.") }
+        }
     }
 
     /**
@@ -140,7 +166,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun setServerUrl(url: String) {
         prefs.edit().putString("server_url", url).apply()
-        _uiState.update { it.copy(serverUrl = url) }
+        _uiState.update { it.copy(serverUrl = url, infoMessage = null) }
         updateRepository(url)
     }
 
@@ -148,6 +174,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * Toggles the web search capability.
      */
     fun toggleWebSearch(enabled: Boolean) {
+        prefs.edit().putBoolean("web_search_enabled", enabled).apply()
         _uiState.update { it.copy(isWebSearchEnabled = enabled) }
     }
 
@@ -155,13 +182,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * Toggles whether the response is streamed or returned all at once.
      */
     fun toggleStreaming(enabled: Boolean) {
+        prefs.edit().putBoolean("streaming_enabled", enabled).apply()
         _uiState.update { it.copy(isStreamingEnabled = enabled) }
     }
 
     /**
-     * Adjusts the verbosity instruction in the system prompt.
+     * Adjusts the verbosity instruction in the system prompt and saves it.
      */
     fun setVerbosity(value: Float) {
+        prefs.edit().putFloat("verbosity", value).apply()
         _uiState.update { it.copy(verbosity = value) }
     }
 
@@ -193,8 +222,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update {
                 result.fold(
                     onSuccess = { models ->
-                        val defaultModel = if (models.contains("gemma3:12b")) "gemma3:12b" else models.firstOrNull()
-                        it.copy(availableModels = models, selectedModel = defaultModel, isLoading = false)
+                        val currentSelected = prefs.getString("selected_model", null)
+                        it.copy(availableModels = models, selectedModel = currentSelected, isLoading = false)
                     },
                     onFailure = { e ->
                         setError("Failed to load models: ${e.message}")
@@ -220,10 +249,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Changes the active model used for chat.
+     * Changes the active model used for chat and saves it.
      */
     fun selectModel(model: String) {
-        _uiState.update { it.copy(selectedModel = model) }
+        prefs.edit().putString("selected_model", model).apply()
+        _uiState.update { it.copy(selectedModel = model, infoMessage = null) }
         modelSupportsTools = true 
     }
 
@@ -348,7 +378,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun sendMessage(text: String) {
         val state = _uiState.value
-        val model = state.selectedModel ?: return
+        val model = state.selectedModel ?: run {
+            setError("No model selected. Please select one in settings.")
+            return
+        }
         val attachedImages = state.attachedImagesBase64
         val webSearch = state.isWebSearchEnabled
         val stream = state.isStreamingEnabled
