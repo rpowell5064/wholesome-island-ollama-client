@@ -70,6 +70,7 @@ fun ChatScreen(
     val scope = rememberCoroutineScope()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    val uriHandler = LocalUriHandler.current
 
     val mainBackground = Color(0xFF1A1A1A)
     val responseBackground = Color(0xFF252525)
@@ -78,10 +79,61 @@ fun ChatScreen(
     val lightGray = Color(0xFFBDBDBD)
     val darkGray = Color(0xFF424242)
 
+    var showTermsDialog by remember { mutableStateOf(false) }
+
     LaunchedEffect(state.messages.size, state.isLoading, state.isSearching) {
         if ((state.isLoading || state.isSearching) && state.messages.isNotEmpty()) {
             listState.animateScrollToItem(0)
         }
+    }
+
+    if (showTermsDialog) {
+        AlertDialog(
+            onDismissRequest = { showTermsDialog = false },
+            title = { Text("Terms of Service") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        text = "Last Updated: February 19, 2026\n\n" +
+                        "1. Acceptance of Terms\n" +
+                        "By downloading or using Wholesome Island (the \"App\"), you agree to these Terms of Service. Wholesome Island is an independent client interface designed for the Ollama framework. It is not affiliated with, endorsed by, or partnered with the Ollama project, Meta, Google, or any other AI model provider.\n\n" +
+                        "2. Nature of Service: Local-First AI\n" +
+                        "Wholesome Island is a locally-hosted client interface.\n" +
+                        "• User-Provided Infrastructure: You are responsible for hosting and maintaining your own Ollama server. The App does not provide the AI models; it facilitates interaction with models you have installed on your own hardware.\n" +
+                        "• Performance: AI response quality, speed, and accuracy are entirely dependent on your local hardware and the specific model weights (e.g., Llama, Gemma, Mistral) you choose to run.\n\n" +
+                        "3. Future-Proof Web Search & Agentic Tools\n" +
+                        "The App includes a \"Web Search\" feature utilizing Jsoup to retrieve real-time information via DuckDuckGo.\n" +
+                        "• Knowledge Retrieval: This feature is designed to \"future-proof\" your local models by bridging the gap between their training cutoff and current events.\n" +
+                        "• Third-Party Data: Search queries are processed directly via DuckDuckGo. By using this feature, you acknowledge that your search queries are subject to DuckDuckGo’s privacy standards.\n" +
+                        "• No Warranty on Results: The developer is not responsible for the accuracy of web search results or the AI's interpretation of that data.\n\n" +
+                        "4. Privacy & Data Integrity\n" +
+                        "• No Middleware: Communication occurs directly between your mobile device and your Ollama server. No chat data, system prompts, or images are ever transmitted to the App developer.\n" +
+                        "• Local Storage: Your chat history and server configurations are stored locally on your device.\n" +
+                        "• Vision Data: If using Vision-enabled models, images are processed on your own hardware via your Ollama instance.\n\n" +
+                        "5. Voluntary Support (The \"Tip Jar\")\n" +
+                        "• Donation-Based: All core features of Wholesome Island are provided for free.\n" +
+                        "• Support the Developer: Tips made via \"Buy Me a Coffee\" or other links are strictly voluntary donations to support the independent development and future-proofing of this tool.\n" +
+                        "• No Refunds: Tips are non-refundable and do not constitute a contract for guaranteed uptime, specific future features, or technical support.\n\n" +
+                        "6. Intellectual Property\n" +
+                        "• \"Ollama,\" \"Llama,\" \"Gemma,\" and other model names are the trademarks of their respective owners.\n" +
+                        "• Wholesome Island is a third-party tool; its use of these names does not imply any trademark infringement or official affiliation.\n\n" +
+                        "7. Limitation of Liability\n" +
+                        "To the maximum extent permitted by law, the developer shall not be liable for any damages—including data loss, hardware strain, or server issues—arising from the use of the App or its connection to your local AI environment.\n\n" +
+                        "8. Changes to Terms\n" +
+                        "The developer reserves the right to update these terms to reflect new \"future-proof\" features or tools. Continued use of the App constitutes acceptance of any updated terms.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTermsDialog = false }) {
+                    Text("Close")
+                }
+            },
+            containerColor = Color(0xFF333333),
+            titleContentColor = Color.White,
+            textContentColor = Color.LightGray
+        )
     }
 
     ModalNavigationDrawer(
@@ -231,6 +283,51 @@ fun ChatScreen(
                             )
                         }
                     }
+
+                    Spacer(Modifier.height(32.dp))
+
+                    Text("Support & Legal", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                    Spacer(Modifier.height(8.dp))
+
+                    NavigationDrawerItem(
+                        label = { Text("Buy Me a Coffee", fontWeight = FontWeight.Bold) },
+                        selected = false,
+                        onClick = { uriHandler.openUri("https://buymeacoffee.com/rpowell5064") },
+                        icon = { Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFFF4081)) },
+                        colors = NavigationDrawerItemDefaults.colors(
+                            unselectedContainerColor = Color(0xFF333333).copy(alpha = 0.5f),
+                            unselectedTextColor = Color.White
+                        ),
+                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    NavigationDrawerItem(
+                        label = { Text("GitHub Repository") },
+                        selected = false,
+                        onClick = { uriHandler.openUri("https://github.com/rpowell5064/wholesome-island-ollama-client/tree/master") },
+                        icon = { Icon(Icons.Default.Code, contentDescription = null, tint = Color.Gray) },
+                        colors = NavigationDrawerItemDefaults.colors(
+                            unselectedContainerColor = Color.Transparent,
+                            unselectedTextColor = Color.Gray
+                        ),
+                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    NavigationDrawerItem(
+                        label = { Text("Terms of Service") },
+                        selected = false,
+                        onClick = { showTermsDialog = true },
+                        icon = { Icon(Icons.Default.Info, contentDescription = null, tint = Color.Gray) },
+                        colors = NavigationDrawerItemDefaults.colors(
+                            unselectedContainerColor = Color.Transparent,
+                            unselectedTextColor = Color.Gray
+                        ),
+                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                    )
 
                     Spacer(Modifier.height(32.dp))
                     
