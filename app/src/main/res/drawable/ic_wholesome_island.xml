@@ -1,0 +1,36 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Water -->
+    <path
+        android:fillColor="#1E90FF"
+        android:pathData="M2,18 C4,17 6,19 8,18 C10,17 12,19 14,18 C16,17 18,19 20,18 C22,17 24,18 24,18 L24,22 L0,22 L0,18 C0,18 1,18.5 2,18 Z" />
+
+    <!-- Island Base -->
+    <path
+        android:fillColor="#DEB887"
+        android:pathData="M4,18 C4,14 8,12 12,12 C16,12 20,14 20,18 L4,18 Z" />
+
+    <!-- Palm Tree Trunk -->
+    <path
+        android:fillColor="#8B4513"
+        android:pathData="M11,12 L10,18 L11,18 L12,12 Z" />
+
+    <!-- Palm Tree Leaves -->
+    <path
+        android:fillColor="#228B22"
+        android:pathData="M11.5,12 C10,11 8,11 7,12 C8,13 10,13 11.5,12 Z" />
+    <path
+        android:fillColor="#32CD32"
+        android:pathData="M11.5,12 C13,11 15,11 16,12 C15,13 13,13 11.5,12 Z" />
+    <path
+        android:fillColor="#228B22"
+        android:pathData="M11.5,12 C11,10 11,8 12,7 C13,8 13,10 11.5,12 Z" />
+
+    <!-- Sun -->
+    <path
+        android:fillColor="#FFD700"
+        android:pathData="M18,5 A3,3 0 1,1 12,5 A3,3 0 1,1 18,5" />
+</vector>
