@@ -15,6 +15,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wholesomeisland.ollamaclient.ui.theme.ChatScreen
 import com.wholesomeisland.ollamaclient.ui.theme.ChatViewModel
@@ -25,6 +26,7 @@ class MainActivity : ComponentActivity() {
     private val chatViewModel: ChatViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         setContent {
             OllamaTheme {

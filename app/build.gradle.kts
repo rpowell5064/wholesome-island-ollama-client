@@ -62,6 +62,9 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.material)
     
+    // Splash Screen API
+    implementation("androidx.core:core-splashscreen:1.0.1")
+    
     // Additional dependencies
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-moshi:2.11.0")
@@ -78,7 +81,7 @@ dependencies {
     // Image loading
     implementation("io.coil-kt:coil-compose:2.7.0")
     
-    // RichText for Markdown support (Removing the conflicting compose-markdown)
+    // RichText for Markdown support
     implementation("com.halilibo.compose-richtext:richtext-ui-material3:0.20.0")
     implementation("com.halilibo.compose-richtext:richtext-commonmark:0.20.0")
 
