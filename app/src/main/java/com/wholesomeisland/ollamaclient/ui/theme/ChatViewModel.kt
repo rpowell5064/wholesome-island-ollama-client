@@ -55,6 +55,7 @@ data class QuickAction(
  */
 data class ChatUiState(
     val serverUrl: String = "",
+    val serverPort: String = "11434",
     val apiKey: String = "",
     val searchEngines: List<SearchEngineConfig> = listOf(ChatConstants.DEFAULT_DDG_CONFIG),
     val selectedSearchEngineId: String = ChatConstants.DEFAULT_SEARCH_ENGINE_ID,
@@ -116,6 +117,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(ChatUiState(
         serverUrl = prefs.getString("server_url", "") ?: "",
+        serverPort = prefs.getString("server_port", "11434") ?: "11434",
         apiKey = prefs.getString("api_key", "") ?: "",
         searchEngines = loadSearchEngines(),
         selectedSearchEngineId = prefs.getString("selected_search_engine_id", ChatConstants.DEFAULT_SEARCH_ENGINE_ID) ?: ChatConstants.DEFAULT_SEARCH_ENGINE_ID,
@@ -129,7 +131,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val searchRegex = Regex("""web_search\s*\(\s*(?:query\s*=\s*)?["'](.+?)["']\s*\)|\[SEARCH:\s*["'](.+?)["']\]|(?:tool_code|call|use|query|search|lookup)\s+web_search\s+query:?\s*["'](.+?)["']""", RegexOption.IGNORE_CASE)
 
     init {
-        updateRepository(_uiState.value.serverUrl, _uiState.value.apiKey)
+        updateRepository(_uiState.value.serverUrl, _uiState.value.serverPort, _uiState.value.apiKey)
         showStartupNotification()
     }
 
@@ -171,15 +173,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun updateRepository(url: String, key: String) {
+    private fun updateRepository(url: String, port: String, key: String) {
         if (url.isBlank() || !url.startsWith("http")) {
             repository = null
             _uiState.update { it.copy(isServerHealthy = null) }
             return
         }
         
+        val fullUrl = if (port.isBlank()) url else {
+            val base = url.removeSuffix("/")
+            val doubleSlashIndex = base.indexOf("://")
+            if (doubleSlashIndex != -1 && base.indexOf(":", doubleSlashIndex + 3) != -1) base else "$base:$port"
+        }
+
         try {
-            repository = OllamaRepository(OllamaServiceFactory.create(url, key))
+            repository = OllamaRepository(OllamaServiceFactory.create(fullUrl, key))
             checkHealthAndLoadModels()
         } catch (e: Exception) {
             repository = null
@@ -187,10 +195,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setConnectionDetails(url: String, key: String) {
-        prefs.edit().putString("server_url", url).putString("api_key", key).apply()
-        _uiState.update { it.copy(serverUrl = url, apiKey = key, infoMessage = null) }
-        updateRepository(url, key)
+    fun setConnectionDetails(url: String, port: String, key: String) {
+        prefs.edit()
+            .putString("server_url", url)
+            .putString("server_port", port)
+            .putString("api_key", key)
+            .apply()
+        _uiState.update { it.copy(serverUrl = url, serverPort = port, apiKey = key, infoMessage = null) }
+        updateRepository(url, port, key)
     }
 
     fun addSearchEngine(name: String, type: String, url: String, apiKey: String, authHeader: String) {

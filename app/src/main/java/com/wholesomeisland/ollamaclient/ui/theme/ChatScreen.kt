@@ -58,7 +58,7 @@ fun ChatScreen(
     state: ChatUiState,
     onSend: (String) -> Unit,
     onPickImage: () -> Unit,
-    onUpdateConnection: (String, String) -> Unit,
+    onUpdateConnection: (String, String, String) -> Unit,
     onSelectModel: (String) -> Unit,
     onClearChat: () -> Unit,
     onDeleteMessage: (Long) -> Unit,
@@ -137,10 +137,12 @@ fun ChatScreen(
                     // Ollama Connection
                     Text("Ollama Server", style = MaterialTheme.typography.labelLarge, color = purple)
                     var urlInput by remember { mutableStateOf(state.serverUrl) }
+                    var portInput by remember { mutableStateOf(state.serverPort) }
                     var apiKeyInput by remember { mutableStateOf(state.apiKey) }
                     OutlinedTextField(value = urlInput, onValueChange = { urlInput = it }, label = { Text("Server URL") }, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White))
+                    OutlinedTextField(value = portInput, onValueChange = { portInput = it }, label = { Text("Port") }, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White))
                     OutlinedTextField(value = apiKeyInput, onValueChange = { apiKeyInput = it }, label = { Text("API Key (Optional)") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White))
-                    Button(onClick = { onUpdateConnection(urlInput, apiKeyInput) }, modifier = Modifier.fillMaxWidth()) { Text("Update Connection") }
+                    Button(onClick = { onUpdateConnection(urlInput, portInput, apiKeyInput) }, modifier = Modifier.fillMaxWidth()) { Text("Update Connection") }
 
                     Spacer(Modifier.height(24.dp))
 
@@ -173,6 +175,13 @@ fun ChatScreen(
                     Slider(value = state.verbosity, onValueChange = onSetVerbosity)
                     Spacer(Modifier.height(24.dp))
                     Text("Model", color = Color.White)
+                    
+                    if (state.isLoading && state.availableModels.isEmpty()) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = purple)
+                    } else if (state.availableModels.isEmpty()) {
+                        Text("No models found. Check connection.", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                    }
+                    
                     state.availableModels.forEach { model ->
                         NavigationDrawerItem(label = { Text(model) }, selected = model == state.selectedModel, onClick = { onSelectModel(model); scope.launch { drawerState.close() } })
                     }
@@ -209,7 +218,14 @@ fun ChatScreen(
             containerColor = mainBackground,
             topBar = {
                 TopAppBar(
-                    title = { Text("Wholesome Island 🌴", color = Color.White, fontWeight = FontWeight.Bold) },
+                    title = { 
+                        Column {
+                            Text("Wholesome Island 🌴", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                            if (state.selectedModel != null) {
+                                Text(state.selectedModel, color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = mainBackground),
                     navigationIcon = { IconButton(onClick = { scope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, contentDescription = null, tint = Color.White) } }
                 )
