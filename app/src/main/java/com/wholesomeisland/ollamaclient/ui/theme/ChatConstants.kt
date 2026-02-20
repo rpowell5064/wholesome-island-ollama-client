@@ -1,8 +1,32 @@
 package com.wholesomeisland.ollamaclient.ui.theme
 
+enum class SearchEngineType {
+    DUCKDUCKGO,
+    API_GET,
+    API_POST
+}
+
+data class SearchEngineConfig(
+    val id: String = "",
+    val name: String = "",
+    val type: String = "DUCKDUCKGO",
+    val url: String = "",
+    val apiKey: String = "",
+    val authHeader: String = "Authorization",
+    val isDeletable: Boolean = true
+)
+
 object ChatConstants {
     const val DEFAULT_SERVER_URL = "http://192.168.5.106:11434/"
+    const val DEFAULT_SEARCH_ENGINE_ID = "default_ddg"
     
+    val DEFAULT_DDG_CONFIG = SearchEngineConfig(
+        id = DEFAULT_SEARCH_ENGINE_ID,
+        name = "DuckDuckGo (Scraper)",
+        type = "DUCKDUCKGO",
+        isDeletable = false
+    )
+
     // System Prompts
     const val BASE_SYSTEM_PROMPT = """You are a helpful, professional AI assistant with REAL-TIME web access. 
         

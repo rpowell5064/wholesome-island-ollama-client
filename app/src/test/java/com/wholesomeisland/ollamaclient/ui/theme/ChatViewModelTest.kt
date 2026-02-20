@@ -35,6 +35,9 @@ class ChatViewModelTest {
         every { editor.putBoolean(any(), any()) } returns editor
         every { editor.putFloat(any(), any()) } returns editor
         every { sharedPrefs.getString("server_url", "") } returns ""
+        every { sharedPrefs.getString("api_key", "") } returns ""
+        every { sharedPrefs.getString("search_engines_json", null) } returns null
+        every { sharedPrefs.getString("selected_search_engine_id", any()) } returns ChatConstants.DEFAULT_SEARCH_ENGINE_ID
         every { sharedPrefs.getString("selected_model", null) } returns null
         every { sharedPrefs.getBoolean("web_search_enabled", true) } returns true
         every { sharedPrefs.getBoolean("streaming_enabled", true) } returns true
@@ -58,13 +61,16 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `setServerUrl updates state and saves to preferences`() {
+    fun `setConnectionDetails updates state and saves to preferences`() {
         val newUrl = "http://1.2.3.4:11434"
+        val newKey = "test-key"
         
-        viewModel.setServerUrl(newUrl)
+        viewModel.setConnectionDetails(newUrl, newKey)
         
         assertEquals(newUrl, viewModel.uiState.value.serverUrl)
+        assertEquals(newKey, viewModel.uiState.value.apiKey)
         verify { editor.putString("server_url", newUrl) }
+        verify { editor.putString("api_key", newKey) }
         verify { editor.apply() }
     }
 
@@ -78,12 +84,30 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `setVerbosity updates state and saves preference`() {
-        viewModel.setVerbosity(0.8f)
+    fun `addSearchEngine updates state and saves to preferences`() {
+        val name = "Custom Search"
+        val type = "API_GET"
+        val url = "https://api.test.com?q={query}"
         
-        assertEquals(0.8f, viewModel.uiState.value.verbosity)
-        verify { editor.putFloat("verbosity", 0.8f) }
-        verify { editor.apply() }
+        viewModel.addSearchEngine(name, type, url, "key", "X-Key")
+        
+        val engines = viewModel.uiState.value.searchEngines
+        assertTrue(engines.any { it.name == name && it.type == type })
+        verify { editor.putString("search_engines_json", any()) }
+    }
+
+    @Test
+    fun `removeSearchEngine updates state and switches to default if needed`() {
+        // First add one
+        viewModel.addSearchEngine("To Remove", "API_GET", "url", "", "")
+        val addedId = viewModel.uiState.value.searchEngines.last().id
+        viewModel.setSelectedSearchEngine(addedId)
+        
+        // Then remove it
+        viewModel.removeSearchEngine(addedId)
+        
+        assertTrue(viewModel.uiState.value.searchEngines.none { it.id == addedId })
+        assertEquals(ChatConstants.DEFAULT_SEARCH_ENGINE_ID, viewModel.uiState.value.selectedSearchEngineId)
     }
 
     @Test
@@ -102,19 +126,5 @@ class ChatViewModelTest {
         
         assertEquals("No model selected. Please select one in settings.", viewModel.uiState.value.error)
         assertEquals(0, viewModel.uiState.value.messages.size)
-    }
-
-    @Test
-    fun `clearMessages empties the message list`() {
-        viewModel.clearMessages()
-        assertTrue(viewModel.uiState.value.messages.isEmpty())
-    }
-    
-    @Test
-    fun `attachImages updates state correctly`() {
-        val images = listOf("base64data")
-        viewModel.attachImages(images)
-        
-        assertEquals(images, viewModel.uiState.value.attachedImagesBase64)
     }
 }

@@ -59,7 +59,7 @@ fun ChatScreenRoot(viewModel: ChatViewModel = viewModel()) {
         state = state,
         onSend = { viewModel.sendMessage(it) },
         onPickImage = { imagePicker.launch("image/*") },
-        onChangeServerUrl = { viewModel.setServerUrl(it) },
+        onUpdateConnection = { url, key -> viewModel.setConnectionDetails(url, key) },
         onSelectModel = { model -> viewModel.selectModel(model) },
         onClearChat = { viewModel.clearMessages() },
         onDeleteMessage = { id -> viewModel.deleteMessage(id) },
@@ -80,6 +80,9 @@ fun ChatScreenRoot(viewModel: ChatViewModel = viewModel()) {
         onSetVerbosity = { viewModel.setVerbosity(it) },
         onQuickAction = { viewModel.performQuickAction(it) },
         onTryAgain = { viewModel.sendMessage(it) },
-        onDismissInfo = { viewModel.dismissInfo() }
+        onDismissInfo = { viewModel.dismissInfo() },
+        onAddSearchEngine = { name, type, url, key, authHeader -> viewModel.addSearchEngine(name, type, url, key, authHeader) },
+        onRemoveSearchEngine = { id -> viewModel.removeSearchEngine(id) },
+        onSelectSearchEngine = { id -> viewModel.setSelectedSearchEngine(id) }
     )
 }
