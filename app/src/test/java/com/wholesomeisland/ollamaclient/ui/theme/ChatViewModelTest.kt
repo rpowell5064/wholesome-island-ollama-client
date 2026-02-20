@@ -35,6 +35,7 @@ class ChatViewModelTest {
         every { editor.putBoolean(any(), any()) } returns editor
         every { editor.putFloat(any(), any()) } returns editor
         every { sharedPrefs.getString("server_url", "") } returns ""
+        every { sharedPrefs.getString("server_port", "11434") } returns "11434"
         every { sharedPrefs.getString("api_key", "") } returns ""
         every { sharedPrefs.getString("search_engines_json", null) } returns null
         every { sharedPrefs.getString("selected_search_engine_id", any()) } returns ChatConstants.DEFAULT_SEARCH_ENGINE_ID
@@ -62,14 +63,17 @@ class ChatViewModelTest {
 
     @Test
     fun `setConnectionDetails updates state and saves to preferences`() {
-        val newUrl = "http://1.2.3.4:11434"
+        val newUrl = "http://1.2.3.4"
+        val newPort = "11434"
         val newKey = "test-key"
         
-        viewModel.setConnectionDetails(newUrl, newKey)
+        viewModel.setConnectionDetails(newUrl, newPort, newKey)
         
         assertEquals(newUrl, viewModel.uiState.value.serverUrl)
+        assertEquals(newPort, viewModel.uiState.value.serverPort)
         assertEquals(newKey, viewModel.uiState.value.apiKey)
         verify { editor.putString("server_url", newUrl) }
+        verify { editor.putString("server_port", newPort) }
         verify { editor.putString("api_key", newKey) }
         verify { editor.apply() }
     }
