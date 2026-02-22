@@ -16,16 +16,30 @@ class OllamaRepository(private val api: OllamaApi) {
     private val generateResponseAdapter = moshi.adapter(GenerateResponse::class.java)
 
     suspend fun healthCheck(): Result<Boolean> = runCatching {
-        api.healthCheck()
-        true
+        val response = api.healthCheck()
+        if (response.isSuccessful) {
+            true
+        } else {
+            throw Exception("Server returned ${response.code()}")
+        }
     }
 
     suspend fun getVersion(): Result<String> = runCatching {
-        api.getVersion().version ?: "unknown"
+        val response = api.getVersion()
+        if (response.isSuccessful) {
+            response.body()?.version ?: "unknown"
+        } else {
+            throw Exception("Version check failed: ${response.code()}")
+        }
     }
 
     suspend fun getModels(): Result<List<String>> = runCatching {
-        api.getModels().models?.mapNotNull { it.name } ?: emptyList()
+        val response = api.getModels()
+        if (response.isSuccessful) {
+            response.body()?.models?.mapNotNull { it.name } ?: emptyList()
+        } else {
+            throw Exception("Failed to load models: ${response.code()}")
+        }
     }
 
     suspend fun sendChat(

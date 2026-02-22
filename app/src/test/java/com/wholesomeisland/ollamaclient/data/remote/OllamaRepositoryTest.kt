@@ -26,7 +26,7 @@ class OllamaRepositoryTest {
 
     @Test
     fun `healthCheck returns success when api call succeeds`() = runBlocking {
-        coEvery { api.healthCheck() } returns "".toResponseBody(null)
+        coEvery { api.healthCheck() } returns Response.success("".toResponseBody(null))
 
         val result = repository.healthCheck()
 
@@ -47,7 +47,8 @@ class OllamaRepositoryTest {
 
     @Test
     fun `getVersion returns version string`() = runBlocking {
-        coEvery { api.getVersion() } returns OllamaVersionResponse("0.1.2")
+        val versionResponse = OllamaVersionResponse("0.1.2")
+        coEvery { api.getVersion() } returns Response.success(versionResponse)
 
         val result = repository.getVersion()
 
@@ -57,13 +58,13 @@ class OllamaRepositoryTest {
 
     @Test
     fun `getModels returns list of model names`() = runBlocking {
-        val response = OllamaTagsResponse(
+        val tagsResponse = OllamaTagsResponse(
             models = listOf(
                 OllamaModelTag("llama3"),
                 OllamaModelTag("gemma")
             )
         )
-        coEvery { api.getModels() } returns response
+        coEvery { api.getModels() } returns Response.success(tagsResponse)
 
         val result = repository.getModels()
 
@@ -73,8 +74,8 @@ class OllamaRepositoryTest {
 
     @Test
     fun `sendChat calls api with correct request`() = runBlocking {
-        val history = listOf(ChatMessage("user", "Hello"))
-        coEvery { api.chat(any()) } returns Response.success(ChatResponse("llama3", message = ChatMessage("assistant", "Hi"), done = true))
+        val history = listOf(ChatMessage("user", "Hello", null))
+        coEvery { api.chat(any()) } returns Response.success(ChatResponse("llama3", message = ChatMessage("assistant", "Hi", null), done = true))
 
         val response = repository.sendChat("llama3", history)
 

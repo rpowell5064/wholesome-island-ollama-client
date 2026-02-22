@@ -74,7 +74,8 @@ fun ChatScreen(
     onDismissInfo: () -> Unit,
     onAddSearchEngine: (String, String, String, String, String) -> Unit,
     onRemoveSearchEngine: (String) -> Unit,
-    onSelectSearchEngine: (String) -> Unit
+    onSelectSearchEngine: (String) -> Unit,
+    onRetryConnection: () -> Unit = {}
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -139,9 +140,31 @@ fun ChatScreen(
                     var urlInput by remember { mutableStateOf(state.serverUrl) }
                     var portInput by remember { mutableStateOf(state.serverPort) }
                     var apiKeyInput by remember { mutableStateOf(state.apiKey) }
-                    OutlinedTextField(value = urlInput, onValueChange = { urlInput = it }, label = { Text("Server URL") }, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White))
-                    OutlinedTextField(value = portInput, onValueChange = { portInput = it }, label = { Text("Port") }, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White))
-                    OutlinedTextField(value = apiKeyInput, onValueChange = { apiKeyInput = it }, label = { Text("API Key (Optional)") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White))
+                    
+                    OutlinedTextField(
+                        value = urlInput,
+                        onValueChange = { urlInput = it },
+                        label = { Text("Server URL") },
+                        placeholder = { Text("http://0.0.0.0", color = Color.Gray.copy(alpha = 0.5f)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                    )
+                    OutlinedTextField(
+                        value = portInput,
+                        onValueChange = { portInput = it },
+                        label = { Text("Port") },
+                        placeholder = { Text("11434", color = Color.Gray.copy(alpha = 0.5f)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                    )
+                    OutlinedTextField(
+                        value = apiKeyInput,
+                        onValueChange = { apiKeyInput = it },
+                        label = { Text("API Key (Optional)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        visualTransformation = PasswordVisualTransformation(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                    )
                     Button(onClick = { onUpdateConnection(urlInput, portInput, apiKeyInput) }, modifier = Modifier.fillMaxWidth()) { Text("Update Connection") }
 
                     Spacer(Modifier.height(24.dp))
@@ -178,8 +201,10 @@ fun ChatScreen(
                     
                     if (state.isLoading && state.availableModels.isEmpty()) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp), color = purple)
-                    } else if (state.availableModels.isEmpty()) {
-                        Text("No models found. Check connection.", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                    } else if (state.availableModels.isEmpty() && state.isServerHealthy == true) {
+                        Text("No models found on server.", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                    } else if (state.isServerHealthy == false) {
+                        Text("Connection failed. Check settings.", color = Color.Red, style = MaterialTheme.typography.bodySmall)
                     }
                     
                     state.availableModels.forEach { model ->
@@ -220,7 +245,47 @@ fun ChatScreen(
                 TopAppBar(
                     title = { 
                         Column {
-                            Text("Wholesome Island 🌴", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Wholesome Island 🌴", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                Spacer(Modifier.width(8.dp))
+                                // Connection Status Dot and Text
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.White.copy(alpha = 0.05f))
+                                        .clickable { onRetryConnection() }
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                when (state.isServerHealthy) {
+                                                    true -> Color.Green
+                                                    false -> Color.Red
+                                                    else -> Color.Gray
+                                                }
+                                            )
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = when (state.isServerHealthy) {
+                                            true -> "Connected"
+                                            false -> "Error"
+                                            else -> "Connecting..."
+                                        },
+                                        color = when (state.isServerHealthy) {
+                                            true -> Color.Green.copy(alpha = 0.8f)
+                                            false -> Color.Red.copy(alpha = 0.8f)
+                                            else -> Color.Gray
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
                             if (state.selectedModel != null) {
                                 Text(state.selectedModel, color = Color.Gray, style = MaterialTheme.typography.labelSmall)
                             }
@@ -334,6 +399,11 @@ fun ResponseBlock(message: ChatUiMessage, onDelete: () -> Unit, onShare: (String
     val isUser = message.role == "user"
     val clipboardManager = LocalClipboardManager.current
     
+    // Don't show empty assistant message boxes
+    if (message.role == "assistant" && message.text.isEmpty() && message.reasoning.isNullOrEmpty()) {
+        return
+    }
+    
     Surface(color = if (isUser) Color.Transparent else aiBackground, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 8.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             if (!message.reasoning.isNullOrBlank()) {
@@ -347,7 +417,9 @@ fun ResponseBlock(message: ChatUiMessage, onDelete: () -> Unit, onShare: (String
             if (isUser) {
                 SelectionContainer { Text(message.text, color = Color.White, style = MaterialTheme.typography.bodyLarge) }
             } else {
-                RichText { Markdown(message.text) }
+                if (message.text.isNotEmpty()) {
+                    RichText { Markdown(message.text) }
+                }
             }
             Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
                 if (isUser) IconButton(onClick = { onTryAgain(message.text) }) { Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(18.dp)) }

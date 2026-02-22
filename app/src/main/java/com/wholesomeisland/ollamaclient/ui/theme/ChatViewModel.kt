@@ -54,7 +54,7 @@ data class QuickAction(
  * State representing the entire Chat Screen UI.
  */
 data class ChatUiState(
-    val serverUrl: String = "",
+    val serverUrl: String = "http://0.0.0.0",
     val serverPort: String = "11434",
     val apiKey: String = "",
     val searchEngines: List<SearchEngineConfig> = listOf(ChatConstants.DEFAULT_DDG_CONFIG),
@@ -107,6 +107,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private var errorTimerJob: Job? = null
     private var infoTimerJob: Job? = null
     private var activeChatJob: Job? = null
+    private var connectionJob: Job? = null
     private val idGenerator = AtomicLong(System.currentTimeMillis())
     private var modelSupportsTools: Boolean = true
     
@@ -116,7 +117,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         .build()
 
     private val _uiState = MutableStateFlow(ChatUiState(
-        serverUrl = prefs.getString("server_url", "") ?: "",
+        serverUrl = prefs.getString("server_url", "http://0.0.0.0") ?: "http://0.0.0.0",
         serverPort = prefs.getString("server_port", "11434") ?: "11434",
         apiKey = prefs.getString("api_key", "") ?: "",
         searchEngines = loadSearchEngines(),
@@ -131,8 +132,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val searchRegex = Regex("""web_search\s*\(\s*(?:query\s*=\s*)?["'](.+?)["']\s*\)|\[SEARCH:\s*["'](.+?)["']\]|(?:tool_code|call|use|query|search|lookup)\s+web_search\s+query:?\s*["'](.+?)["']""", RegexOption.IGNORE_CASE)
 
     init {
-        updateRepository(_uiState.value.serverUrl, _uiState.value.serverPort, _uiState.value.apiKey)
-        showStartupNotification()
+        val url = _uiState.value.serverUrl
+        val port = _uiState.value.serverPort
+        val apiKey = _uiState.value.apiKey
+        if (url.isNotBlank() && url != "http://0.0.0.0") {
+            updateRepository(url, port, apiKey)
+        } else {
+            showStartupNotification()
+        }
     }
 
     private fun loadSearchEngines(): List<SearchEngineConfig> {
@@ -156,13 +163,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun showStartupNotification() {
         val state = _uiState.value
         when {
-            state.serverUrl.isBlank() || !state.serverUrl.startsWith("http") -> {
+            state.serverUrl.isBlank() || state.serverUrl == "http://0.0.0.0" -> {
                 _uiState.update { it.copy(infoMessage = "Welcome! Please enter your Ollama server address in settings.") }
             }
-            state.selectedModel == null -> {
+            state.isServerHealthy == true && (state.selectedModel == null || state.availableModels.isEmpty()) -> {
                 _uiState.update { it.copy(infoMessage = "Server connected! Now select a model in settings to start.") }
             }
-            else -> {
+            state.isServerHealthy == true -> {
                 _uiState.update { it.copy(infoMessage = "Ready to chat.") }
                 infoTimerJob?.cancel()
                 infoTimerJob = viewModelScope.launch {
@@ -174,24 +181,35 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun updateRepository(url: String, port: String, key: String) {
-        if (url.isBlank() || !url.startsWith("http")) {
+        val trimmedUrl = url.trim().removeSuffix("/")
+        if (trimmedUrl.isBlank()) {
             repository = null
             _uiState.update { it.copy(isServerHealthy = null) }
             return
         }
-        
-        val fullUrl = if (port.isBlank()) url else {
-            val base = url.removeSuffix("/")
-            val doubleSlashIndex = base.indexOf("://")
-            if (doubleSlashIndex != -1 && base.indexOf(":", doubleSlashIndex + 3) != -1) base else "$base:$port"
+
+        val baseWithProtocol = if (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) {
+            trimmedUrl
+        } else {
+            "http://$trimmedUrl"
+        }
+
+        // Check if there is already a port (look for colon after the protocol)
+        val protocolEndIndex = baseWithProtocol.indexOf("://") + 3
+        val hasExplicitPort = baseWithProtocol.indexOf(":", protocolEndIndex) != -1
+
+        val finalUrl = if (hasExplicitPort || port.isBlank()) {
+            baseWithProtocol
+        } else {
+            "$baseWithProtocol:${port.trim()}"
         }
 
         try {
-            repository = OllamaRepository(OllamaServiceFactory.create(fullUrl, key))
-            checkHealthAndLoadModels()
+            repository = OllamaRepository(OllamaServiceFactory.create(finalUrl, key))
+            checkHealthAndLoadModels(port.ifBlank { "11434" })
         } catch (e: Exception) {
             repository = null
-            _uiState.update { it.copy(isServerHealthy = false, error = "Invalid server URL format.") }
+            _uiState.update { it.copy(isServerHealthy = false, error = "Invalid URL format: ${e.localizedMessage}") }
         }
     }
 
@@ -201,8 +219,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             .putString("server_port", port)
             .putString("api_key", key)
             .apply()
-        _uiState.update { it.copy(serverUrl = url, serverPort = port, apiKey = key, infoMessage = null) }
+        _uiState.update { it.copy(
+            serverUrl = url, 
+            serverPort = port, 
+            apiKey = key, 
+            infoMessage = null, 
+            availableModels = emptyList(), 
+            selectedModel = null, 
+            isServerHealthy = null,
+            error = null
+        ) }
         updateRepository(url, port, key)
+    }
+
+    fun retryConnection() {
+        val state = _uiState.value
+        updateRepository(state.serverUrl, state.serverPort, state.apiKey)
     }
 
     fun addSearchEngine(name: String, type: String, url: String, apiKey: String, authHeader: String) {
@@ -254,16 +286,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(verbosity = value) }
     }
 
-    private fun checkHealthAndLoadModels() {
+    private fun checkHealthAndLoadModels(port: String) {
         val repo = repository ?: return
-        viewModelScope.launch {
+        connectionJob?.cancel()
+        connectionJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null, isServerHealthy = null) }
             val healthResult = repo.healthCheck()
             if (healthResult.isSuccess) {
                 _uiState.update { it.copy(isServerHealthy = true) }
                 loadModels()
+                showStartupNotification()
             } else {
-                _uiState.update { it.copy(isServerHealthy = false, isLoading = false, error = "Server unreachable. Check your URL and API Key.") }
+                val errorMsg = healthResult.exceptionOrNull()?.localizedMessage ?: "Unknown connection error"
+                val advice = if (errorMsg.contains("Failed to connect", ignoreCase = true) || errorMsg.contains("Connection refused", ignoreCase = true)) {
+                    "\n\nHint: Ensure Ollama is running with OLLAMA_HOST=0.0.0.0 and your PC's firewall allows port $port."
+                } else ""
+                
+                _uiState.update { it.copy(
+                    isServerHealthy = false, 
+                    isLoading = false, 
+                    error = "Server unreachable: $errorMsg$advice"
+                ) }
+                // Try loading models anyway, in case / is blocked but /api/tags works
+                loadModels()
             }
         }
     }
@@ -273,15 +318,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             val result = repo.getModels()
-            _uiState.update {
+            _uiState.update { current ->
                 result.fold(
                     onSuccess = { models ->
                         val currentSelected = prefs.getString("selected_model", null)
-                        it.copy(availableModels = models, selectedModel = currentSelected, isLoading = false)
+                        val newSelected = if (models.contains(currentSelected)) currentSelected else if (models.isNotEmpty()) models.first() else null
+                        if (newSelected != currentSelected && newSelected != null) {
+                            prefs.edit().putString("selected_model", newSelected).apply()
+                        }
+                        current.copy(
+                            availableModels = models, 
+                            selectedModel = newSelected, 
+                            isLoading = false,
+                            isServerHealthy = if (models.isNotEmpty()) true else current.isServerHealthy
+                        )
                     },
                     onFailure = { e ->
-                        setError("Failed to load models: ${e.message}")
-                        it.copy(isLoading = false)
+                        if (current.isServerHealthy != true) {
+                            setError("Failed to load models: ${e.localizedMessage}")
+                        }
+                        current.copy(isLoading = false)
                     }
                 )
             }

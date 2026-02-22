@@ -85,16 +85,16 @@ data class RunningModelsResponse(val models: List<RunningModel>?)
 
 interface OllamaApi {
     @GET("/")
-    suspend fun healthCheck(): ResponseBody
+    suspend fun healthCheck(): Response<ResponseBody>
 
     @GET("api/version")
-    suspend fun getVersion(): OllamaVersionResponse
+    suspend fun getVersion(): Response<OllamaVersionResponse>
 
     @GET("api/tags")
-    suspend fun getModels(): OllamaTagsResponse
+    suspend fun getModels(): Response<OllamaTagsResponse>
 
     @GET("api/ps")
-    suspend fun getRunningModels(): RunningModelsResponse
+    suspend fun getRunningModels(): Response<RunningModelsResponse>
 
     @POST("api/chat")
     suspend fun chat(@Body request: ChatRequest): Response<ChatResponse>
