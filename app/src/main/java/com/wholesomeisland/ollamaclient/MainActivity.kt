@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -116,7 +117,7 @@ fun StreamingSplashScreen(onFinish: () -> Unit) {
 fun ChatScreenRoot(viewModel: ChatViewModel = viewModel()) {
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
-    var showSplash by remember { mutableStateOf(true) }
+    var showSplash by rememberSaveable { mutableStateOf(true) }
 
     if (showSplash) {
         StreamingSplashScreen(onFinish = { showSplash = false })
@@ -163,7 +164,8 @@ fun ChatScreenRoot(viewModel: ChatViewModel = viewModel()) {
             onDismissInfo = { viewModel.dismissInfo() },
             onAddSearchEngine = { name, type, url, key, authHeader -> viewModel.addSearchEngine(name, type, url, key, authHeader) },
             onRemoveSearchEngine = { id -> viewModel.removeSearchEngine(id) },
-            onSelectSearchEngine = { id -> viewModel.setSelectedSearchEngine(id) }
+            onSelectSearchEngine = { id -> viewModel.setSelectedSearchEngine(id) },
+            onRetryConnection = { viewModel.retryConnection() }
         )
     }
 }
