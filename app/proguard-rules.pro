@@ -43,5 +43,10 @@
 -keep class okhttp3.** { *; }
 -dontwarn okhttp3.**
 
+# Keep Data Classes for Moshi serialization
+-keep class com.wholesomeisland.ollamaclient.data.remote.** { *; }
+-keep class com.wholesomeisland.ollamaclient.ui.theme.SearchEngineConfig { *; }
+-keep class com.wholesomeisland.ollamaclient.ui.theme.SearchEngineType { *; }
+
 # JSpecify annotations
 -dontwarn org.jspecify.annotations.**
