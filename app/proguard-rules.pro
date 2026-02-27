@@ -1,26 +1,13 @@
 # Add project specific ProGuard rules here.
 # You can control the set of applied configuration files using the
 # proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Kotlin Metadata & Reflection (Crucial for Moshi + KotlinJsonAdapterFactory)
+-keep class kotlin.Metadata { *; }
+-keep class kotlin.reflect.jvm.internal.** { *; }
+-keepattributes RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations, Signature, InnerClasses, EnclosingMethod
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
-
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
-
-# Moshi - Keeps the JSON adapter generation logic
+# Moshi rules
 -keep class com.squareup.moshi.** { *; }
 -keep @com.squareup.moshi.JsonQualifier interface *
 -keepclassmembers class * {
@@ -28,25 +15,24 @@
     @com.squareup.moshi.ToJson *;
 }
 
-# Retrofit - Keeps your API interface methods
--keepattributes Signature, InnerClasses, EnclosingMethod
--keepattributes RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations
+# Retrofit rules
 -keep class retrofit2.** { *; }
 -keep interface retrofit2.** { *; }
+-dontwarn retrofit2.**
 
-# Jsoup - Ensures the web scraper is not removed
+# Jsoup rules
 -keep class org.jsoup.** { *; }
 
-# OkHttp - Networking support
--keepattributes Signature
--keepattributes *Annotation*
+# OkHttp rules
 -keep class okhttp3.** { *; }
 -dontwarn okhttp3.**
 
-# Keep Data Classes for Moshi serialization
+# Keep our app's data models to prevent obfuscation issues with Moshi
 -keep class com.wholesomeisland.ollamaclient.data.remote.** { *; }
 -keep class com.wholesomeisland.ollamaclient.ui.theme.SearchEngineConfig { *; }
 -keep class com.wholesomeisland.ollamaclient.ui.theme.SearchEngineType { *; }
+-keep class com.wholesomeisland.ollamaclient.ui.theme.ChatUiMessage { *; }
+-keep class com.wholesomeisland.ollamaclient.ui.theme.QuickAction { *; }
 
 # JSpecify annotations
 -dontwarn org.jspecify.annotations.**
