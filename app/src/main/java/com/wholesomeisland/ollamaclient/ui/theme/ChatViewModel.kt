@@ -1,5 +1,6 @@
 package com.wholesomeisland.ollamaclient.ui.theme
-
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
@@ -11,17 +12,27 @@ import com.wholesomeisland.ollamaclient.data.remote.ChatMessage
 import com.wholesomeisland.ollamaclient.data.remote.OllamaRepository
 import com.wholesomeisland.ollamaclient.data.remote.OllamaServiceFactory
 import com.wholesomeisland.ollamaclient.data.remote.ToolCall
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.jsoup.Jsoup
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -77,7 +88,9 @@ data class ChatUiState(
         QuickAction("Summarize", "Summarize our conversation.", "summarize"),
         QuickAction("Tasks", "Extract action items.", "list"),
         QuickAction("Simplify", "Explain simply.", "help")
-    )
+    ),
+    val discoveredIps: List<String> = emptyList(),
+    val isDiscovering: Boolean = false
 )
 
 /**
@@ -108,6 +121,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private var infoTimerJob: Job? = null
     private var activeChatJob: Job? = null
     private var connectionJob: Job? = null
+    private var discoveryJob: Job? = null
     private val idGenerator = AtomicLong(System.currentTimeMillis())
     private var modelSupportsTools: Boolean = true
     
@@ -237,6 +251,102 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         updateRepository(state.serverUrl, state.serverPort, state.apiKey)
     }
 
+    private fun getLocalIPAddress(): String? {
+        try {
+            val interfaces = java.util.Collections.list(java.net.NetworkInterface.getNetworkInterfaces())
+            for (iface in interfaces) {
+                if (iface.isLoopback || !iface.isUp) continue
+                
+                // Prefer Wi-Fi or Ethernet interfaces
+                val name = iface.name.lowercase(Locale.US)
+                if (name.contains("wlan") || name.contains("eth") || name.contains("en")) {
+                    val addresses = java.util.Collections.list(iface.inetAddresses)
+                    for (addr in addresses) {
+                        if (addr is java.net.Inet4Address) {
+                            return addr.hostAddress
+                        }
+                    }
+                }
+            }
+            // Fallback: just find the first non-loopback IPv4
+            for (iface in interfaces) {
+                if (iface.isLoopback || !iface.isUp) continue
+                val addresses = java.util.Collections.list(iface.inetAddresses)
+                for (addr in addresses) {
+                    if (addr is java.net.Inet4Address) {
+                        return addr.hostAddress
+                    }
+                }
+            }
+        } catch (e: Exception) {}
+        return null
+    }
+
+    fun discoverOllamaServers() {
+        if (discoveryJob?.isActive == true) return
+
+        discoveryJob = viewModelScope.launch(Dispatchers.IO) {
+            withContext(Dispatchers.Main) {
+                _uiState.update { it.copy(isDiscovering = true, discoveredIps = emptyList(), error = null) }
+            }
+
+            // Limit to 15 concurrent socket attempts to prevent OS-level crashes
+            val semaphore = Semaphore(15)
+
+            try {
+                val ip = getLocalIPAddress()
+                if (ip == null || !ip.contains(".")) {
+                    // ... same error handling as before ...
+                    return@launch
+                }
+
+                val prefix = ip.substring(0, ip.lastIndexOf(".") + 1)
+                val discovered = mutableListOf<String>()
+
+                // Create all 254 tasks
+                val jobs = (1..254).map { j ->
+                    async {
+                        semaphore.withPermit { // Wait for a free slot
+                            val targetIp = prefix + j
+                            if (targetIp == ip) return@async null
+                            try {
+                                val socket = Socket()
+                                // Shorter timeout (500ms) is usually enough for local LAN
+                                socket.connect(InetSocketAddress(targetIp, 11434), 500)
+                                socket.close()
+                                targetIp
+                            } catch (e: Exception) {
+                                null
+                            }
+                        }
+                    }
+                }
+
+                // Wait for results and update UI as they come in
+                jobs.forEach { job ->
+                    val result = job.await()
+                    if (result != null) {
+                        discovered.add(result)
+                        withContext(Dispatchers.Main) {
+                            _uiState.update { it.copy(discoveredIps = discovered.toList()) }
+                        }
+                    }
+                }
+
+                if (discovered.isEmpty()) {
+                    withContext(Dispatchers.Main) { setError("No Ollama servers found.") }
+                }
+
+            } catch (e: Exception) {
+                // ... error handling ...
+            } finally {
+                withContext(Dispatchers.Main) {
+                    _uiState.update { it.copy(isDiscovering = false) }
+                }
+            }
+        }
+    }
+
     fun addSearchEngine(name: String, type: String, url: String, apiKey: String, authHeader: String) {
         val newEngine = SearchEngineConfig(
             id = UUID.randomUUID().toString(),
@@ -307,7 +417,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     isLoading = false, 
                     error = "Server unreachable: $errorMsg$advice"
                 ) }
-                // Try loading models anyway, in case / is blocked but /api/tags works
                 loadModels()
             }
         }

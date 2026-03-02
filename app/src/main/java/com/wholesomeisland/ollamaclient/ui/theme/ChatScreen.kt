@@ -45,6 +45,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.util.Base64
 import com.halilibo.richtext.markdown.Markdown
 import com.halilibo.richtext.ui.CodeBlockStyle
 import com.halilibo.richtext.ui.RichTextStyle
@@ -75,7 +76,8 @@ fun ChatScreen(
     onAddSearchEngine: (String, String, String, String, String) -> Unit,
     onRemoveSearchEngine: (String) -> Unit,
     onSelectSearchEngine: (String) -> Unit,
-    onRetryConnection: () -> Unit = {}
+    onRetryConnection: () -> Unit = {},
+    onDiscoverServers: () -> Unit = {}
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -135,7 +137,7 @@ fun ChatScreen(
                     Text("Settings", style = MaterialTheme.typography.titleLarge, color = Color.White)
                     Spacer(Modifier.height(24.dp))
 
-                    // Ollama Connection
+                    // Ollama Connection Group
                     Text("Ollama Server", style = MaterialTheme.typography.labelLarge, color = purple)
                     var urlInput by remember { mutableStateOf(state.serverUrl) }
                     var portInput by remember { mutableStateOf(state.serverPort) }
@@ -165,9 +167,42 @@ fun ChatScreen(
                         visualTransformation = PasswordVisualTransformation(),
                         colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
                     )
+                    
+                    Spacer(Modifier.height(24.dp)) // Extra space before button
                     Button(onClick = { onUpdateConnection(urlInput, portInput, apiKeyInput) }, modifier = Modifier.fillMaxWidth()) { Text("Update Connection") }
 
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(16.dp))
+                    
+                    // Discovery Section
+                    if (state.isDiscovering) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Scanning Wi-Fi...", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                        }
+                    } else {
+                        OutlinedButton(onClick = onDiscoverServers, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Find Servers on LAN")
+                        }
+                    }
+                    
+                    state.discoveredIps.forEach { ip ->
+                        TextButton(
+                            onClick = { onUpdateConnection(ip, "11434", apiKeyInput) },
+                            modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+                            contentPadding = PaddingValues(horizontal = 16.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.Green)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Use Found Server: $ip", color = purple, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(32.dp))
 
                     // Dynamic Search Engines
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -318,6 +353,29 @@ fun ChatScreen(
 
                     HorizontalDivider(color = Color(0xFF333333))
 
+                    if (state.attachedImagesBase64.isNotEmpty()) {
+                        LazyRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            items(state.attachedImagesBase64) { base64 ->
+                                val bitmap = remember(base64) {
+                                    val decodedString = Base64.decode(base64, Base64.DEFAULT)
+                                    BitmapFactory.decodeByteArray(decodedString, 0, decodedString.size)
+                                }
+                                Box(modifier = Modifier.padding(end = 8.dp)) {
+                                    Image(
+                                        bitmap = bitmap.asImageBitmap(),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    IconButton(
+                                        onClick = onClearAttachedImages,
+                                        modifier = Modifier.align(Alignment.TopEnd).size(20.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                                    ) { Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp)) }
+                                }
+                            }
+                        }
+                    }
+
                     var input by remember { mutableStateOf("") }
                     Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onPickImage) { Icon(Icons.Default.Image, contentDescription = null, tint = Color.Gray) }
@@ -328,8 +386,8 @@ fun ChatScreen(
                             placeholder = { Text("Ask anything...", color = Color.Gray) },
                             colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
                         )
-                        IconButton(onClick = { if (input.isNotBlank()) { onSend(input.trim()); input = ""; keyboardController?.hide(); focusManager.clearFocus() } }, enabled = !state.isLoading) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, tint = if (input.isNotBlank()) purple else Color.DarkGray)
+                        IconButton(onClick = { if (input.isNotBlank() || state.attachedImagesBase64.isNotEmpty()) { onSend(input.trim()); input = ""; keyboardController?.hide(); focusManager.clearFocus() } }, enabled = !state.isLoading) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, tint = if (input.isNotBlank() || state.attachedImagesBase64.isNotEmpty()) purple else Color.DarkGray)
                         }
                     }
                 }
@@ -406,6 +464,23 @@ fun ResponseBlock(message: ChatUiMessage, onDelete: () -> Unit, onShare: (String
     
     Surface(color = if (isUser) Color.Transparent else aiBackground, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 8.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
+            if (isUser && message.imagesBase64.isNotEmpty()) {
+                LazyRow(modifier = Modifier.padding(bottom = 12.dp)) {
+                    items(message.imagesBase64) { base64 ->
+                        val bitmap = remember(base64) {
+                            val decodedString = Base64.decode(base64, Base64.DEFAULT)
+                            BitmapFactory.decodeByteArray(decodedString, 0, decodedString.size)
+                        }
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = null,
+                            modifier = Modifier.size(120.dp).clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
+                }
+            }
+
             if (!message.reasoning.isNullOrBlank()) {
                 Surface(color = Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 12.dp)) {
                     Column(modifier = Modifier.padding(12.dp)) {

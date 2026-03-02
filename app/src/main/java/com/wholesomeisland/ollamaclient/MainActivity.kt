@@ -55,7 +55,6 @@ fun StreamingSplashScreen(onFinish: () -> Unit) {
     val fullText = "Wholesome Island"
     var displayedText by remember { mutableStateOf("") }
     
-    // Blinking cursor animation
     val infiniteTransition = rememberInfiniteTransition(label = "cursor")
     val cursorAlpha by infiniteTransition.animateFloat(
         initialValue = 1f,
@@ -71,9 +70,9 @@ fun StreamingSplashScreen(onFinish: () -> Unit) {
         delay(500)
         fullText.forEachIndexed { index, _ ->
             displayedText = fullText.substring(0, index + 1)
-            delay(100) // Streaming speed
+            delay(100)
         }
-        delay(1200) // Hold after finishing
+        delay(1200)
         onFinish()
     }
 
@@ -100,7 +99,6 @@ fun StreamingSplashScreen(onFinish: () -> Unit) {
                     color = Color(0xFF1A1A1A),
                     fontWeight = FontWeight.Bold
                 )
-                // AI-style cursor
                 Box(
                     modifier = Modifier
                         .padding(start = 4.dp)
@@ -165,7 +163,8 @@ fun ChatScreenRoot(viewModel: ChatViewModel = viewModel()) {
             onAddSearchEngine = { name, type, url, key, authHeader -> viewModel.addSearchEngine(name, type, url, key, authHeader) },
             onRemoveSearchEngine = { id -> viewModel.removeSearchEngine(id) },
             onSelectSearchEngine = { id -> viewModel.setSelectedSearchEngine(id) },
-            onRetryConnection = { viewModel.retryConnection() }
+            onRetryConnection = { viewModel.retryConnection() },
+            onDiscoverServers = { viewModel.discoverOllamaServers() }
         )
     }
 }
