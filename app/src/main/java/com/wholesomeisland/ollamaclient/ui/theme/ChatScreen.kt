@@ -1,12 +1,24 @@
 package com.wholesomeisland.ollamaclient.ui.theme
 
 import android.graphics.BitmapFactory
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeOut
+import android.util.Base64
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -14,14 +26,68 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,23 +99,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.util.Base64
 import com.halilibo.richtext.markdown.Markdown
 import com.halilibo.richtext.ui.CodeBlockStyle
 import com.halilibo.richtext.ui.RichTextStyle
 import com.halilibo.richtext.ui.material3.RichText
+import com.halilibo.richtext.ui.string.RichTextStringStyle
 import com.wholesomeisland.ollamaclient.R
 import kotlinx.coroutines.launch
 
@@ -353,6 +416,34 @@ fun ChatScreen(
 
                     HorizontalDivider(color = Color(0xFF333333))
 
+                    // Quick Actions
+                    if (state.messages.any { it.role == "assistant" } && !state.isLoading) {
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(state.quickActions) { action ->
+                                AssistChip(
+                                    onClick = { onQuickAction(action) },
+                                    label = { Text(action.label, color = Color.White, style = MaterialTheme.typography.labelMedium) },
+                                    leadingIcon = {
+                                        val icon = when (action.icon) {
+                                            "summarize" -> Icons.Default.AutoAwesome
+                                            "list" -> Icons.AutoMirrored.Filled.FormatListBulleted
+                                            "help" -> Icons.Default.Lightbulb
+                                            else -> Icons.Default.Bolt
+                                        }
+                                        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = purple)
+                                    },
+                                    colors = AssistChipDefaults.assistChipColors(containerColor = Color.White.copy(alpha = 0.05f)),
+                                    border = null,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                            }
+                        }
+                    }
+
                     if (state.attachedImagesBase64.isNotEmpty()) {
                         LazyRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                             items(state.attachedImagesBase64) { base64 ->
@@ -482,18 +573,23 @@ fun ResponseBlock(message: ChatUiMessage, onDelete: () -> Unit, onShare: (String
             }
 
             if (!message.reasoning.isNullOrBlank()) {
+                val displayReasoning = remember(message.reasoning) {
+                    if (message.reasoning.length > 2000) message.reasoning.take(2000) + "... (truncated)" else message.reasoning
+                }
                 Surface(color = Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 12.dp)) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text("Thought", style = MaterialTheme.typography.labelSmall, color = accentColor, fontWeight = FontWeight.Bold)
-                        Text(message.reasoning, color = Color.LightGray.copy(alpha = 0.8f), fontStyle = FontStyle.Italic)
+                        Text(displayReasoning, color = Color.LightGray.copy(alpha = 0.8f), fontStyle = FontStyle.Italic)
                     }
                 }
             }
             if (isUser) {
-                SelectionContainer { Text(message.text, color = Color.White, style = MaterialTheme.typography.bodyLarge) }
+                SelectionContainer {
+                    Text(message.text, color = Color.White, style = MaterialTheme.typography.bodyLarge)
+                }
             } else {
                 if (message.text.isNotEmpty()) {
-                    RichText { Markdown(message.text) }
+                    AssistantMessageContent(message.text, accentColor)
                 }
             }
             Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
@@ -517,4 +613,87 @@ fun ResponseBlock(message: ChatUiMessage, onDelete: () -> Unit, onShare: (String
             }
         }
     }
+}
+
+@Composable
+private fun AssistantMessageContent(text: String, accentColor: Color) {
+    val imageRegex = remember { Regex("<startImage>(.*?)<endImage>", RegexOption.DOT_MATCHES_ALL) }
+    
+    val parts = remember(text) {
+        val result = mutableListOf<MessagePart>()
+        var lastIndex = 0
+        imageRegex.findAll(text).forEach { match ->
+            if (match.range.first > lastIndex) {
+                result.add(MessagePart.Text(text.substring(lastIndex, match.range.first)))
+            }
+            result.add(MessagePart.Image(match.groupValues[1].trim()))
+            lastIndex = match.range.last + 1
+        }
+        if (lastIndex < text.length) {
+            result.add(MessagePart.Text(text.substring(lastIndex)))
+        }
+        result
+    }
+
+    Column {
+        parts.forEach { part ->
+            when (part) {
+                is MessagePart.Text -> {
+                    if (part.content.isNotBlank()) {
+                        val displayContent = remember(part.content) {
+                            if (part.content.length > 10000) part.content.take(10000) + "... (truncated)" else part.content
+                        }
+                        RichText(
+                            style = RichTextStyle(
+                                stringStyle = RichTextStringStyle(
+                                    linkStyle = SpanStyle(
+                                        color = Color(0xFF64B5F6), // Readable light blue for dark theme
+                                        fontWeight = FontWeight.Bold,
+                                        textDecoration = TextDecoration.Underline
+                                    )
+                                ),
+                                codeBlockStyle = CodeBlockStyle(
+                                    textStyle = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        color = Color.LightGray
+                                    ),
+                                    modifier = Modifier
+                                        .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                                        .padding(8.dp)
+                                )
+                            )
+                        ) {
+                            Markdown(displayContent)
+                        }
+                    }
+                }
+                is MessagePart.Image -> {
+                    val bitmap = remember(part.base64) {
+                        try {
+                            val decodedString = Base64.decode(part.base64, Base64.DEFAULT)
+                            BitmapFactory.decodeByteArray(decodedString, 0, decodedString.size)
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    bitmap?.let {
+                        Image(
+                            bitmap = it.asImageBitmap(),
+                            contentDescription = "Generated Image",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private sealed class MessagePart {
+    data class Text(val content: String) : MessagePart()
+    data class Image(val base64: String) : MessagePart()
 }

@@ -1,6 +1,4 @@
 package com.wholesomeisland.ollamaclient.ui.theme
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
@@ -25,6 +23,8 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -126,8 +126,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private var modelSupportsTools: Boolean = true
     
     private val searchClient = OkHttpClient.Builder()
-        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
     private val _uiState = MutableStateFlow(ChatUiState(
@@ -405,7 +405,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (healthResult.isSuccess) {
                 _uiState.update { it.copy(isServerHealthy = true) }
                 loadModels()
-                showStartupNotification()
             } else {
                 val errorMsg = healthResult.exceptionOrNull()?.localizedMessage ?: "Unknown connection error"
                 val advice = if (errorMsg.contains("Failed to connect", ignoreCase = true) || errorMsg.contains("Connection refused", ignoreCase = true)) {
@@ -417,7 +416,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     isLoading = false, 
                     error = "Server unreachable: $errorMsg$advice"
                 ) }
-                loadModels()
             }
         }
     }
@@ -439,17 +437,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             availableModels = models, 
                             selectedModel = newSelected, 
                             isLoading = false,
-                            isServerHealthy = if (models.isNotEmpty()) true else current.isServerHealthy
+                            isServerHealthy = true
                         )
                     },
                     onFailure = { e ->
-                        if (current.isServerHealthy != true) {
+                        if (current.isServerHealthy == true) {
                             setError("Failed to load models: ${e.localizedMessage}")
                         }
                         current.copy(isLoading = false)
                     }
                 )
             }
+            showStartupNotification()
         }
     }
 
@@ -488,7 +487,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun setError(message: String?) {
         errorTimerJob?.cancel()
         val displayMessage = if (message.isNullOrBlank() || message == "null") "An unknown error occurred" else message
-        _uiState.update { it.copy(error = displayMessage) }
+        _uiState.update { it.copy(error = displayMessage.take(500)) } 
         errorTimerJob = viewModelScope.launch {
             delay(10000)
             _uiState.update { it.copy(error = null) }
@@ -499,6 +498,34 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         activeChatJob?.cancel()
         activeChatJob = null
         _uiState.update { it.copy(isLoading = false, isSearching = false, searchQuery = null, progressMessage = ChatConstants.IDLE_PROGRESS) }
+    }
+
+    private suspend fun processSearchResponse(rawBody: String): String {
+        return try {
+            val adapter = moshi.adapter(Map::class.java)
+            val data = adapter.fromJson(rawBody) as? Map<*, *>
+            
+            val apiError = data?.get("error")?.toString()
+            if (!apiError.isNullOrBlank()) {
+                return "Search API Error: $apiError"
+            }
+
+            val results = data?.get("organic_results") as? List<Map<*, *>> 
+                ?: data?.get("results") as? List<Map<*, *>>
+                ?: data?.get("items") as? List<Map<*, *>>
+            
+            if (results != null) {
+                results.take(3).mapIndexed { index, item ->
+                    val title = (item["title"] ?: item["name"] ?: "Result").toString().take(100)
+                    val snippet = (item["snippet"] ?: item["description"] ?: item["content"] ?: "").toString().take(300)
+                    "[$title]: $snippet"
+                }.joinToString("\n\n").take(1200)
+            } else {
+                rawBody.take(1000).replace(Regex("[\\x00-\\x1F\\x7F]"), "") 
+            }
+        } catch (e: Exception) {
+            rawBody.take(1000).replace(Regex("[\\x00-\\x1F\\x7F]"), "")
+        }
     }
 
     private suspend fun performWebSearch(query: String): String = withContext(Dispatchers.IO + NonCancellable) {
@@ -517,33 +544,45 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     searchClient.newCall(request).execute().use { response ->
                         val html = response.body?.string() ?: ""
                         val doc = Jsoup.parse(html)
-                        val results = doc.select(".result").take(5).map { 
-                            "**${it.select(".result__a").text()}**\n${it.select(".result__snippet").text()}" 
+                        val results = doc.select(".result").take(3).map { 
+                            "**${it.select(".result__a").text().take(100)}**\n${it.select(".result__snippet").text().take(300)}" 
                         }
                         if (results.isEmpty()) "No results found." else results.joinToString("\n\n")
                     }
                 }
                 "API_GET" -> {
                     val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-                    val finalUrl = if (engine.url.contains("{query}")) {
-                        engine.url.replace("{query}", encodedQuery)
+                    var finalUrl = engine.url.replace("?", "&") // Normalize to avoid double '?'
+                    
+                    // Re-insert the first '?' correctly
+                    if (finalUrl.contains("&")) {
+                        finalUrl = finalUrl.replaceFirst("&", "?")
+                    } else if (!finalUrl.contains("?")) {
+                        finalUrl += "?"
+                    }
+
+                    if (finalUrl.contains("{query}")) {
+                        finalUrl = finalUrl.replace("{query}", encodedQuery)
                     } else {
-                        val separator = if (engine.url.contains("?")) "&" else "?"
-                        "${engine.url}${separator}q=$encodedQuery"
+                        val separator = if (finalUrl.endsWith("?") || finalUrl.endsWith("&")) "" else "&"
+                        finalUrl = "${finalUrl}${separator}q=$encodedQuery"
+                    }
+                    
+                    if (finalUrl.contains("{apiKey}")) {
+                        finalUrl = finalUrl.replace("{apiKey}", engine.apiKey)
+                    } else if (engine.apiKey.isNotBlank()) {
+                        val separator = if (finalUrl.endsWith("?") || finalUrl.endsWith("&")) "" else "&"
+                        finalUrl = "${finalUrl}${separator}api_key=${engine.apiKey}"
                     }
                     
                     val requestBuilder = Request.Builder().url(finalUrl)
-                    if (engine.apiKey.isNotBlank()) {
+                    if (engine.apiKey.isNotBlank() && !finalUrl.contains(engine.apiKey)) {
                         requestBuilder.addHeader(engine.authHeader, if (engine.authHeader.lowercase() == "authorization") "Bearer ${engine.apiKey}" else engine.apiKey)
                     }
                     
                     searchClient.newCall(requestBuilder.build()).execute().use { response ->
                         val body = response.body?.string() ?: ""
-                        if (body.trim().startsWith("{") || body.trim().startsWith("[")) {
-                            "Search Results (JSON Raw):\n$body"
-                        } else {
-                            "Search Results:\n$body"
-                        }
+                        processSearchResponse(body)
                     }
                 }
                 "API_POST" -> {
@@ -567,7 +606,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                     searchClient.newCall(requestBuilder.build()).execute().use { response ->
                         val body = response.body?.string() ?: ""
-                        "Search Results (POST):\n$body"
+                        processSearchResponse(body)
                     }
                 }
                 else -> "Error: Unknown search engine type."
@@ -617,11 +656,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         val history = mutableListOf<ChatMessage>()
         history.add(ChatMessage(role = "system", content = systemContent))
+        
         val imageCutoff = state.messages.size - 2
-        history.addAll(state.messages.mapIndexed { index, msg -> 
-            ChatMessage(role = msg.role, content = msg.text, reasoningContent = msg.reasoning, images = if (index >= imageCutoff) msg.imagesBase64.ifEmpty { null } else null, toolCalls = msg.toolCalls)
-        })
-        history.add(ChatMessage("user", text, null, state.attachedImagesBase64.ifEmpty { null }, null, null))
+        val recentMessages = if (state.messages.size > 4) state.messages.takeLast(4) else state.messages
+        
+        recentMessages.forEachIndexed { index, msg -> 
+            val totalIndex = if (state.messages.size > 4) (state.messages.size - 4) + index else index
+            history.add(ChatMessage(
+                role = msg.role, 
+                content = msg.text.take(1000), 
+                reasoningContent = msg.reasoning?.take(500), 
+                images = if (totalIndex >= imageCutoff) msg.imagesBase64.ifEmpty { null } else null, 
+                toolCalls = msg.toolCalls
+            ))
+        }
+        
+        history.add(ChatMessage("user", text.take(1500), null, state.attachedImagesBase64.ifEmpty { null }, null, null))
 
         _uiState.update { it.copy(messages = it.messages + newUserMessage, isLoading = true, progressMessage = ChatConstants.IDLE_PROGRESS, error = null, attachedImagesBase64 = emptyList()) }
         performSendMessage(model, history, state.isWebSearchEnabled, state.isStreamingEnabled)
@@ -648,7 +698,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                         val response = repo.sendChatStream(model, currentHistory, webSearch, modelSupportsTools, tools)
                         if (!response.isSuccessful) {
-                            val err = response.errorBody()?.string() ?: "HTTP ${response.code()}"
+                            val err = response.errorBody()?.string()?.take(300) ?: "HTTP ${response.code()}"
                             if (err.contains("not support tools")) {
                                 modelSupportsTools = false
                                 _uiState.update { it.copy(messages = it.messages.filter { it.id != msgId }) }
@@ -706,7 +756,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         val response = repo.sendChat(model, currentHistory, webSearch, false, modelSupportsTools, tools)
                         if (!response.isSuccessful) {
-                            setError(response.errorBody()?.string() ?: "HTTP ${response.code()}")
+                            setError(response.errorBody()?.string()?.take(300) ?: "HTTP ${response.code()}")
                             _uiState.update { it.copy(isLoading = false) }
                             return@launch
                         }
