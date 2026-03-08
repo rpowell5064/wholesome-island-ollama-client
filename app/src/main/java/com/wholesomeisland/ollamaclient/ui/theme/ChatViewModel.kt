@@ -856,10 +856,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         _uiState.update { it.copy(messages = it.messages + newUserMessage, isLoading = true, progressMessage = ChatConstants.IDLE_PROGRESS, error = null, attachedImagesBase64 = emptyList()) }
         saveContexts()
-        performSendMessage(model, history, state.isWebSearchEnabled, state.isStreamingEnabled)
+        performSendMessage(model, history, state.isWebSearchEnabled, state.isStreamingEnabled, systemContent)
     }
 
-    private fun performSendMessage(model: String, history: List<ChatMessage>, webSearch: Boolean, stream: Boolean) {
+    private fun performSendMessage(model: String, history: List<ChatMessage>, webSearch: Boolean, stream: Boolean, systemContent: String) {
         activeChatJob?.cancel()
         activeChatJob = viewModelScope.launch {
             val repo = repository ?: return@launch
@@ -879,6 +879,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         _uiState.update { it.copy(messages = it.messages + ChatUiMessage(msgId, "assistant", "")) }
 
                         val response = repo.sendChatStream(model, currentHistory, webSearch, modelSupportsTools, tools)
+                        
+                        // FALLBACK CHECK: If api/chat fails with 404/405, use api/generate
+                        if (!response.isSuccessful && (response.code() == 404 || response.code() == 405)) {
+                            _uiState.update { it.copy(messages = it.messages.filter { it.id != msgId }) }
+                            performGenerateFallback(model, currentHistory, stream, systemContent)
+                            return@launch
+                        }
+
                         if (!response.isSuccessful) {
                             val err = response.errorBody()?.string()?.take(300) ?: "HTTP ${response.code()}"
                             if (err.contains("not support tools")) {
@@ -939,6 +947,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     } else {
                         val response = repo.sendChat(model, currentHistory, webSearch, false, modelSupportsTools, tools)
+                        
+                        // FALLBACK CHECK: If api/chat fails with 404/405, use api/generate
+                        if (!response.isSuccessful && (response.code() == 404 || response.code() == 405)) {
+                            performGenerateFallback(model, currentHistory, stream, systemContent)
+                            return@launch
+                        }
+
                         if (!response.isSuccessful) {
                             setError(response.errorBody()?.string()?.take(300) ?: "HTTP ${response.code()}")
                             _uiState.update { it.copy(isLoading = false) }
@@ -982,6 +997,65 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
             }
+        }
+    }
+
+    /**
+     * Fallback for models that do not support structured Chat (api/chat).
+     * Compiles history into a single prompt string for api/generate.
+     */
+    private suspend fun performGenerateFallback(model: String, history: List<ChatMessage>, stream: Boolean, system: String) {
+        val repo = repository ?: return
+        val msgId = idGenerator.incrementAndGet()
+        
+        // Convert history to a single string prompt
+        val fullPrompt = history.filter { it.role != "system" }.joinToString("\n") { msg ->
+            when(msg.role) {
+                "user" -> "User: ${msg.content}"
+                "assistant" -> "Assistant: ${msg.content}"
+                else -> "${msg.role?.replaceFirstChar { it.uppercase() }}: ${msg.content}"
+            }
+        } + "\nAssistant:"
+
+        try {
+            if (stream) {
+                var responseText = ""
+                var reasoningText = ""
+                _uiState.update { it.copy(messages = it.messages + ChatUiMessage(msgId, "assistant", "")) }
+                
+                val response = repo.generateStream(model, fullPrompt, system)
+                if (!response.isSuccessful) {
+                    setError(response.errorBody()?.string()?.take(300) ?: "HTTP ${response.code()}")
+                    _uiState.update { it.copy(isLoading = false) }
+                    return
+                }
+
+                repo.parseGenerateStream(response.body()!!)
+                    .catch { e -> setError(e.message); _uiState.update { it.copy(isLoading = false) } }
+                    .collect { chunk ->
+                        responseText += chunk
+                        _uiState.update { current ->
+                            current.copy(messages = current.messages.map { 
+                                if (it.id == msgId) it.copy(text = responseText) else it 
+                            })
+                        }
+                    }
+                _uiState.update { it.copy(isLoading = false) }
+                saveContexts()
+            } else {
+                val response = repo.generate(model, fullPrompt, system, false)
+                if (!response.isSuccessful) {
+                    setError(response.errorBody()?.string()?.take(300) ?: "HTTP ${response.code()}")
+                    _uiState.update { it.copy(isLoading = false) }
+                    return
+                }
+                val text = response.body()?.response ?: ""
+                _uiState.update { it.copy(messages = it.messages + ChatUiMessage(msgId, "assistant", text), isLoading = false) }
+                saveContexts()
+            }
+        } catch (e: Exception) {
+            setError(e.localizedMessage)
+            _uiState.update { it.copy(isLoading = false) }
         }
     }
 }
