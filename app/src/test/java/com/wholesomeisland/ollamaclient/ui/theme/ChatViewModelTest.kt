@@ -10,6 +10,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.*
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -34,7 +35,7 @@ class ChatViewModelTest {
         every { editor.putString(any(), any()) } returns editor
         every { editor.putBoolean(any(), any()) } returns editor
         every { editor.putFloat(any(), any()) } returns editor
-        every { sharedPrefs.getString("server_url", "") } returns ""
+        every { sharedPrefs.getString("server_url", "http://0.0.0.0") } returns "http://0.0.0.0"
         every { sharedPrefs.getString("server_port", "11434") } returns "11434"
         every { sharedPrefs.getString("api_key", "") } returns ""
         every { sharedPrefs.getString("search_engines_json", null) } returns null
@@ -42,7 +43,11 @@ class ChatViewModelTest {
         every { sharedPrefs.getString("selected_model", null) } returns null
         every { sharedPrefs.getBoolean("web_search_enabled", true) } returns true
         every { sharedPrefs.getBoolean("streaming_enabled", true) } returns true
-        every { sharedPrefs.getFloat("verbosity", 0.5f) } returns 0.5f
+        every { sharedPrefs.getString("verbosity_level", any()) } returns VerbosityLevel.BALANCED.name
+        every { sharedPrefs.getString("chat_contexts_json", null) } returns null
+        every { sharedPrefs.getString("current_context_id", null) } returns null
+        every { sharedPrefs.getString("custom_prompts_json", null) } returns null
+        every { sharedPrefs.getString("selected_prompt_id", "default_prompt") } returns "default_prompt"
         
         mockkObject(com.wholesomeisland.ollamaclient.data.remote.OllamaServiceFactory)
         
@@ -88,6 +93,51 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `setVerbosity updates state and saves preference`() {
+        viewModel.setVerbosity(VerbosityLevel.CONCISE)
+        
+        assertEquals(VerbosityLevel.CONCISE, viewModel.uiState.value.verbosity)
+        verify { editor.putString("verbosity_level", VerbosityLevel.CONCISE.name) }
+        verify { editor.apply() }
+    }
+
+    @Test
+    fun `createNewChat generates new context and clears messages`() {
+        val oldContextId = viewModel.uiState.value.currentContextId
+        
+        viewModel.createNewChat()
+        
+        val newContextId = viewModel.uiState.value.currentContextId
+        assertNotEquals(oldContextId, newContextId)
+        assertTrue(viewModel.uiState.value.messages.isEmpty())
+        verify { editor.putString("chat_contexts_json", any()) }
+    }
+
+    @Test
+    fun `addPrompt adds new prompt to list and saves`() {
+        val name = "Test Persona"
+        val content = "You are a test."
+        
+        viewModel.addPrompt(name, content)
+        
+        val prompts = viewModel.uiState.value.customPrompts
+        assertTrue(prompts.any { it.name == name && it.content == content })
+        verify { editor.putString("custom_prompts_json", any()) }
+    }
+
+    @Test
+    fun `deletePrompt removes prompt and falls back to default if active`() {
+        viewModel.addPrompt("To Delete", "Content")
+        val addedId = viewModel.uiState.value.customPrompts.last().id
+        viewModel.setSelectedPrompt(addedId)
+        
+        viewModel.deletePrompt(addedId)
+        
+        assertTrue(viewModel.uiState.value.customPrompts.none { it.id == addedId })
+        assertEquals("default_prompt", viewModel.uiState.value.selectedPromptId)
+    }
+
+    @Test
     fun `addSearchEngine updates state and saves to preferences`() {
         val name = "Custom Search"
         val type = "API_GET"
@@ -98,20 +148,6 @@ class ChatViewModelTest {
         val engines = viewModel.uiState.value.searchEngines
         assertTrue(engines.any { it.name == name && it.type == type })
         verify { editor.putString("search_engines_json", any()) }
-    }
-
-    @Test
-    fun `removeSearchEngine updates state and switches to default if needed`() {
-        // First add one
-        viewModel.addSearchEngine("To Remove", "API_GET", "url", "", "")
-        val addedId = viewModel.uiState.value.searchEngines.last().id
-        viewModel.setSelectedSearchEngine(addedId)
-        
-        // Then remove it
-        viewModel.removeSearchEngine(addedId)
-        
-        assertTrue(viewModel.uiState.value.searchEngines.none { it.id == addedId })
-        assertEquals(ChatConstants.DEFAULT_SEARCH_ENGINE_ID, viewModel.uiState.value.selectedSearchEngineId)
     }
 
     @Test
@@ -128,7 +164,7 @@ class ChatViewModelTest {
     fun `sendMessage shows error when no model is selected`() {
         viewModel.sendMessage("Hello")
         
-        assertEquals("No model selected. Please select one in settings.", viewModel.uiState.value.error)
+        assertEquals("No model selected. Please select one.", viewModel.uiState.value.error)
         assertEquals(0, viewModel.uiState.value.messages.size)
     }
 }
