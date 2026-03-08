@@ -164,7 +164,14 @@ fun ChatScreenRoot(viewModel: ChatViewModel = viewModel()) {
             onRemoveSearchEngine = { id -> viewModel.removeSearchEngine(id) },
             onSelectSearchEngine = { id -> viewModel.setSelectedSearchEngine(id) },
             onRetryConnection = { viewModel.retryConnection() },
-            onDiscoverServers = { viewModel.discoverOllamaServers() }
+            onDiscoverServers = { viewModel.discoverOllamaServers() },
+            onNewChat = { viewModel.createNewChat() },
+            onSelectContext = { id -> viewModel.selectContext(id) },
+            onDeleteContext = { id -> viewModel.deleteContext(id) },
+            onAddPrompt = { name, content -> viewModel.addPrompt(name, content) },
+            onUpdatePrompt = { id, name, content -> viewModel.updatePrompt(id, name, content) },
+            onDeletePrompt = { id -> viewModel.deletePrompt(id) },
+            onSelectPrompt = { id -> viewModel.setSelectedPrompt(id) }
         )
     }
 }

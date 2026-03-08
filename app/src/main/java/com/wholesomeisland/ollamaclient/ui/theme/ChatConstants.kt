@@ -6,6 +6,12 @@ enum class SearchEngineType {
     API_POST
 }
 
+enum class VerbosityLevel(val label: String, val value: Float, val instruction: String) {
+    CONCISE("Concise", 0.1f, "Be extremely concise. Use bullet points and short sentences. Avoid fluff."),
+    BALANCED("Balanced", 0.5f, "Provide balanced responses with moderate detail and natural flow."),
+    DETAILED("Detailed", 1.0f, "Provide comprehensive, thorough, and detailed explanations. Explore nuances.")
+}
+
 data class SearchEngineConfig(
     val id: String = "",
     val name: String = "",

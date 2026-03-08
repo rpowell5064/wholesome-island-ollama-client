@@ -39,14 +39,18 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -56,6 +60,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -63,6 +69,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
@@ -81,6 +88,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -106,6 +114,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.halilibo.richtext.markdown.Markdown
@@ -132,7 +141,7 @@ fun ChatScreen(
     onToggleWebSearch: (Boolean) -> Unit,
     onCancelRequest: () -> Unit,
     onToggleStreaming: (Boolean) -> Unit,
-    onSetVerbosity: (Float) -> Unit,
+    onSetVerbosity: (VerbosityLevel) -> Unit,
     onQuickAction: (QuickAction) -> Unit,
     onTryAgain: (String) -> Unit,
     onDismissInfo: () -> Unit,
@@ -140,7 +149,14 @@ fun ChatScreen(
     onRemoveSearchEngine: (String) -> Unit,
     onSelectSearchEngine: (String) -> Unit,
     onRetryConnection: () -> Unit = {},
-    onDiscoverServers: () -> Unit = {}
+    onDiscoverServers: () -> Unit = {},
+    onNewChat: () -> Unit = {},
+    onSelectContext: (String) -> Unit = {},
+    onDeleteContext: (String) -> Unit = {},
+    onAddPrompt: (String, String) -> Unit = { _, _ -> },
+    onUpdatePrompt: (String, String, String) -> Unit = { _, _, _ -> },
+    onDeletePrompt: (String) -> Unit = {},
+    onSelectPrompt: (String) -> Unit = {}
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -153,9 +169,22 @@ fun ChatScreen(
     val responseBackground = Color(0xFF252525)
     val purple = MaterialTheme.colorScheme.primary
 
+    var showSettingsSheet by remember { mutableStateOf(false) }
     var showAddEngineDialog by remember { mutableStateOf(false) }
     var showTermsDialog by remember { mutableStateOf(false) }
     var termsText by remember { mutableStateOf("Loading...") }
+    
+    var showPromptEditDialog by remember { mutableStateOf<PromptConfig?>(null) }
+    var showAddPromptDialog by remember { mutableStateOf(false) }
+
+    val listState = rememberLazyListState()
+
+    // Scroll to bottom when new messages arrive
+    LaunchedEffect(state.messages.size) {
+        if (state.messages.isNotEmpty()) {
+            listState.animateScrollToItem(0)
+        }
+    }
 
     LaunchedEffect(showTermsDialog) {
         if (showTermsDialog) {
@@ -190,133 +219,90 @@ fun ChatScreen(
         )
     }
 
+    if (showSettingsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSettingsSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = Color(0xFF222222)
+        ) {
+            SettingsContent(
+                state = state,
+                onUpdateConnection = onUpdateConnection,
+                onDiscoverServers = onDiscoverServers,
+                onAddSearchEngine = { showAddEngineDialog = true },
+                onRemoveSearchEngine = onRemoveSearchEngine,
+                onSelectSearchEngine = onSelectSearchEngine,
+                onToggleWebSearch = onToggleWebSearch,
+                onToggleStreaming = onToggleStreaming,
+                onAddPrompt = { showAddPromptDialog = true },
+                onEditPrompt = { showPromptEditDialog = it },
+                onDeletePrompt = onDeletePrompt,
+                onSelectPrompt = onSelectPrompt,
+                purple = purple
+            )
+        }
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(drawerContainerColor = Color(0xFF222222)) {
                 Column(
-                    modifier = Modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(16.dp)
+                    modifier = Modifier.fillMaxHeight().padding(16.dp)
                 ) {
-                    Text("Settings", style = MaterialTheme.typography.titleLarge, color = Color.White)
-                    Spacer(Modifier.height(24.dp))
-
-                    // Ollama Connection Group
-                    Text("Ollama Server", style = MaterialTheme.typography.labelLarge, color = purple)
-                    var urlInput by remember { mutableStateOf(state.serverUrl) }
-                    var portInput by remember { mutableStateOf(state.serverPort) }
-                    var apiKeyInput by remember { mutableStateOf(state.apiKey) }
-                    
-                    OutlinedTextField(
-                        value = urlInput,
-                        onValueChange = { urlInput = it },
-                        label = { Text("Server URL") },
-                        placeholder = { Text("http://0.0.0.0", color = Color.Gray.copy(alpha = 0.5f)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
-                    )
-                    OutlinedTextField(
-                        value = portInput,
-                        onValueChange = { portInput = it },
-                        label = { Text("Port") },
-                        placeholder = { Text("11434", color = Color.Gray.copy(alpha = 0.5f)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
-                    )
-                    OutlinedTextField(
-                        value = apiKeyInput,
-                        onValueChange = { apiKeyInput = it },
-                        label = { Text("API Key (Optional)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        visualTransformation = PasswordVisualTransformation(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
-                    )
-                    
-                    Spacer(Modifier.height(24.dp)) // Extra space before button
-                    Button(onClick = { onUpdateConnection(urlInput, portInput, apiKeyInput) }, modifier = Modifier.fillMaxWidth()) { Text("Update Connection") }
-
+                    Text("Chat History", style = MaterialTheme.typography.titleLarge, color = Color.White)
                     Spacer(Modifier.height(16.dp))
                     
-                    // Discovery Section
-                    if (state.isDiscovering) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Scanning Wi-Fi...", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
-                        }
-                    } else {
-                        OutlinedButton(onClick = onDiscoverServers, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Find Servers on LAN")
-                        }
+                    Button(
+                        onClick = { onNewChat(); scope.launch { drawerState.close() } },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = purple)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("New Chat")
                     }
                     
-                    state.discoveredIps.forEach { ip ->
-                        TextButton(
-                            onClick = { onUpdateConnection(ip, "11434", apiKeyInput) },
-                            modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
-                            contentPadding = PaddingValues(horizontal = 16.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.Green)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Use Found Server: $ip", color = purple, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(16.dp))
+                    
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState()).weight(1f)) {
+                        state.contexts.sortedByDescending { it.lastUpdated }.forEach { chatContext ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (state.currentContextId == chatContext.id) Color.White.copy(alpha = 0.1f) else Color.Transparent)
+                                    .clickable { onSelectContext(chatContext.id); scope.launch { drawerState.close() } }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Text(
+                                    text = chatContext.name,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                IconButton(onClick = { onDeleteContext(chatContext.id) }, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Gray, modifier = Modifier.size(18.dp))
+                                }
                             }
+                            Spacer(Modifier.height(4.dp))
                         }
                     }
 
-                    Spacer(Modifier.height(32.dp))
-
-                    // Dynamic Search Engines
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Search Engines", style = MaterialTheme.typography.labelLarge, color = purple, modifier = Modifier.weight(1f))
-                        IconButton(onClick = { showAddEngineDialog = true }) { Icon(Icons.Default.Add, contentDescription = "Add search engine", tint = purple) }
-                    }
-                    state.searchEngines.forEach { engine ->
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onSelectSearchEngine(engine.id) }.padding(vertical = 4.dp)) {
-                            RadioButton(selected = state.selectedSearchEngineId == engine.id, onClick = { onSelectSearchEngine(engine.id) })
-                            Text(engine.name, color = if (state.selectedSearchEngineId == engine.id) Color.White else Color.Gray, modifier = Modifier.weight(1f))
-                            if (engine.isDeletable) {
-                                IconButton(onClick = { onRemoveSearchEngine(engine.id) }) { Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Gray, modifier = Modifier.size(20.dp)) }
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(24.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Web Search", modifier = Modifier.weight(1f), color = Color.White)
-                        Switch(checked = state.isWebSearchEnabled, onCheckedChange = onToggleWebSearch)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Streaming", modifier = Modifier.weight(1f), color = Color.White)
-                        Switch(checked = state.isStreamingEnabled, onCheckedChange = onToggleStreaming)
-                    }
-                    Spacer(Modifier.height(24.dp))
-                    Text("Model Verbosity", color = Color.White)
-                    Slider(value = state.verbosity, onValueChange = onSetVerbosity)
-                    Spacer(Modifier.height(24.dp))
-                    Text("Model", color = Color.White)
+                    Spacer(Modifier.height(16.dp))
+                    HorizontalDivider(color = Color.Gray.copy(alpha = 0.2f))
+                    Spacer(Modifier.height(16.dp))
                     
-                    if (state.isLoading && state.availableModels.isEmpty()) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = purple)
-                    } else if (state.availableModels.isEmpty() && state.isServerHealthy == true) {
-                        Text("No models found on server.", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
-                    } else if (state.isServerHealthy == false) {
-                        Text("Connection failed. Check settings.", color = Color.Red, style = MaterialTheme.typography.bodySmall)
-                    }
-                    
-                    state.availableModels.forEach { model ->
-                        NavigationDrawerItem(label = { Text(model) }, selected = model == state.selectedModel, onClick = { onSelectModel(model); scope.launch { drawerState.close() } })
-                    }
-
-                    Spacer(Modifier.height(32.dp))
                     Text("Support & Legal", style = MaterialTheme.typography.labelLarge, color = purple)
                     Spacer(Modifier.height(8.dp))
                     NavigationDrawerItem(
-                        label = { Text("Buy Me a Coffee") },
+                        label = { Text("Terms & Privacy") },
                         selected = false,
-                        onClick = { uriHandler.openUri("https://buymeacoffee.com/rpowell5064") },
-                        icon = { Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFFF4081)) }
+                        onClick = { showTermsDialog = true },
+                        icon = { Icon(Icons.Default.Info, contentDescription = null, tint = Color.Gray) }
                     )
                     NavigationDrawerItem(
                         label = { Text("GitHub Repository") },
@@ -325,14 +311,11 @@ fun ChatScreen(
                         icon = { Icon(Icons.Default.Code, contentDescription = null, tint = Color.Gray) }
                     )
                     NavigationDrawerItem(
-                        label = { Text("Terms & Privacy") },
+                        label = { Text("Buy Me a Coffee") },
                         selected = false,
-                        onClick = { showTermsDialog = true },
-                        icon = { Icon(Icons.Default.Info, contentDescription = null, tint = Color.Gray) }
+                        onClick = { uriHandler.openUri("https://buymeacoffee.com/rpowell5064") },
+                        icon = { Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFFF4081)) }
                     )
-
-                    Spacer(Modifier.height(32.dp))
-                    Button(onClick = onClearChat, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))) { Text("Clear Chat", color = Color.LightGray) }
                 }
             }
         }
@@ -346,7 +329,7 @@ fun ChatScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("Wholesome Island 🌴", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                                 Spacer(Modifier.width(8.dp))
-                                // Connection Status Dot and Text
+                                // Connection Status Dot
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
@@ -384,19 +367,21 @@ fun ChatScreen(
                                     )
                                 }
                             }
-                            if (state.selectedModel != null) {
-                                Text(state.selectedModel, color = Color.Gray, style = MaterialTheme.typography.labelSmall)
-                            }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = mainBackground),
-                    navigationIcon = { IconButton(onClick = { scope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, contentDescription = null, tint = Color.White) } }
+                    navigationIcon = { IconButton(onClick = { scope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, contentDescription = "Open Drawer", tint = Color.White) } },
+                    actions = {
+                        IconButton(onClick = { showSettingsSheet = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White)
+                        }
+                    }
                 )
             }
         ) { padding ->
             Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    val listState = rememberLazyListState()
+                    
                     LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), reverseLayout = true) {
                         if (state.isLoading || state.isSearching) {
                             item {
@@ -467,8 +452,11 @@ fun ChatScreen(
                         }
                     }
 
+                    // Integrated Model and Verbosity Controls
+                    ChatControlsRow(state, onSelectModel, onSetVerbosity, purple)
+
                     var input by remember { mutableStateOf("") }
-                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onPickImage) { Icon(Icons.Default.Image, contentDescription = null, tint = Color.Gray) }
                         TextField(
                             value = input,
@@ -540,6 +528,321 @@ fun ChatScreen(
             },
             dismissButton = { TextButton(onClick = { showAddEngineDialog = false }) { Text("Cancel") } }
         )
+    }
+    
+    if (showAddPromptDialog) {
+        var name by remember { mutableStateOf("") }
+        var content by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showAddPromptDialog = false },
+            title = { Text("Add System Prompt") },
+            text = {
+                Column {
+                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Prompt Name") }, modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = content, 
+                        onValueChange = { content = it }, 
+                        label = { Text("Prompt Content") }, 
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp),
+                        minLines = 8
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = { if (name.isNotBlank() && content.isNotBlank()) { onAddPrompt(name, content); showAddPromptDialog = false } }) { Text("Add") }
+            },
+            dismissButton = { TextButton(onClick = { showAddPromptDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    showPromptEditDialog?.let { prompt ->
+        val isReadOnly = !prompt.isDeletable
+        var name by remember { mutableStateOf(prompt.name) }
+        var content by remember { mutableStateOf(prompt.content) }
+        AlertDialog(
+            onDismissRequest = { showPromptEditDialog = null },
+            title = { Text(if (isReadOnly) "View System Prompt" else "Edit System Prompt") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = name, 
+                        onValueChange = { name = it }, 
+                        label = { Text("Prompt Name") }, 
+                        modifier = Modifier.fillMaxWidth(),
+                        readOnly = isReadOnly
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = content, 
+                        onValueChange = { content = it }, 
+                        label = { Text("Prompt Content") }, 
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp),
+                        minLines = 8,
+                        readOnly = isReadOnly
+                    )
+                }
+            },
+            confirmButton = {
+                if (!isReadOnly) {
+                    Button(onClick = { if (name.isNotBlank() && content.isNotBlank()) { onUpdatePrompt(prompt.id, name, content); showPromptEditDialog = null } }) { Text("Save") }
+                } else {
+                    Button(onClick = { showPromptEditDialog = null }) { Text("Close") }
+                }
+            },
+            dismissButton = {
+                if (!isReadOnly) {
+                    TextButton(onClick = { showPromptEditDialog = null }) { Text("Cancel") }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun ChatControlsRow(
+    state: ChatUiState,
+    onSelectModel: (String) -> Unit,
+    onSetVerbosity: (VerbosityLevel) -> Unit,
+    accentColor: Color
+) {
+    var showModelDropdown by remember { mutableStateOf(false) }
+    var showVerbosityDropdown by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Model Selection Dropdown
+        Box(modifier = Modifier.weight(1f)) {
+            Surface(
+                onClick = { showModelDropdown = true },
+                color = Color.White.copy(alpha = 0.05f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Bolt, contentDescription = null, tint = accentColor, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = state.selectedModel ?: "Select Model",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+            DropdownMenu(
+                expanded = showModelDropdown,
+                onDismissRequest = { showModelDropdown = false },
+                modifier = Modifier.background(Color(0xFF333333))
+            ) {
+                state.availableModels.forEach { model ->
+                    DropdownMenuItem(
+                        text = { Text(model, color = Color.White, style = MaterialTheme.typography.bodySmall) },
+                        onClick = { onSelectModel(model); showModelDropdown = false }
+                    )
+                }
+            }
+        }
+        
+        Spacer(Modifier.width(12.dp))
+        
+        // Verbosity Selection Dropdown
+        Box(modifier = Modifier.weight(1f)) {
+            Surface(
+                onClick = { showVerbosityDropdown = true },
+                color = Color.White.copy(alpha = 0.05f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Tune, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = state.verbosity.label,
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+            DropdownMenu(
+                expanded = showVerbosityDropdown,
+                onDismissRequest = { showVerbosityDropdown = false },
+                modifier = Modifier.background(Color(0xFF333333))
+            ) {
+                VerbosityLevel.values().forEach { level ->
+                    DropdownMenuItem(
+                        text = { 
+                            Column {
+                                Text(level.label, color = Color.White, style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    text = when(level) {
+                                        VerbosityLevel.CONCISE -> "Short & snappy"
+                                        VerbosityLevel.BALANCED -> "Standard response"
+                                        VerbosityLevel.DETAILED -> "Deep & thorough"
+                                    },
+                                    color = Color.Gray,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        },
+                        onClick = { onSetVerbosity(level); showVerbosityDropdown = false }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsContent(
+    state: ChatUiState,
+    onUpdateConnection: (String, String, String) -> Unit,
+    onDiscoverServers: () -> Unit,
+    onAddSearchEngine: () -> Unit,
+    onRemoveSearchEngine: (String) -> Unit,
+    onSelectSearchEngine: (String) -> Unit,
+    onToggleWebSearch: (Boolean) -> Unit,
+    onToggleStreaming: (Boolean) -> Unit,
+    onAddPrompt: () -> Unit,
+    onEditPrompt: (PromptConfig) -> Unit,
+    onDeletePrompt: (String) -> Unit,
+    onSelectPrompt: (String) -> Unit,
+    purple: Color
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)
+    ) {
+        Text("Ollama Server", style = MaterialTheme.typography.labelLarge, color = purple)
+        var urlInput by remember { mutableStateOf(state.serverUrl) }
+        var portInput by remember { mutableStateOf(state.serverPort) }
+        var apiKeyInput by remember { mutableStateOf(state.apiKey) }
+        
+        OutlinedTextField(
+            value = urlInput,
+            onValueChange = { urlInput = it },
+            label = { Text("Server URL") },
+            placeholder = { Text("http://0.0.0.0", color = Color.Gray.copy(alpha = 0.5f)) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+        )
+        OutlinedTextField(
+            value = portInput,
+            onValueChange = { portInput = it },
+            label = { Text("Port") },
+            placeholder = { Text("11434", color = Color.Gray.copy(alpha = 0.5f)) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+        )
+        OutlinedTextField(
+            value = apiKeyInput,
+            onValueChange = { apiKeyInput = it },
+            label = { Text("API Key (Optional)") },
+            modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation(),
+            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+        )
+        
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = { onUpdateConnection(urlInput, portInput, apiKeyInput) }, modifier = Modifier.fillMaxWidth()) { Text("Update Connection") }
+
+        Spacer(Modifier.height(16.dp))
+        
+        if (state.isDiscovering) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Scanning Wi-Fi...", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+            }
+        } else {
+            OutlinedButton(onClick = onDiscoverServers, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Find Servers on LAN")
+            }
+        }
+        
+        state.discoveredIps.forEach { ip ->
+            TextButton(
+                onClick = { onUpdateConnection(ip, "11434", apiKeyInput) },
+                modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.Green)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Use Found Server: $ip", color = purple, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("System Prompts", style = MaterialTheme.typography.labelLarge, color = purple, modifier = Modifier.weight(1f))
+            IconButton(onClick = onAddPrompt) { Icon(Icons.Default.Add, contentDescription = "Add prompt", tint = purple) }
+        }
+        state.customPrompts.forEach { prompt ->
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onSelectPrompt(prompt.id) }.padding(vertical = 4.dp)) {
+                RadioButton(selected = state.selectedPromptId == prompt.id, onClick = { onSelectPrompt(prompt.id) })
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(prompt.name, color = if (state.selectedPromptId == prompt.id) Color.White else Color.Gray)
+                    Text(prompt.content, color = Color.Gray, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = { onEditPrompt(prompt) }) { 
+                    Icon(
+                        if (prompt.isDeletable) Icons.Default.Edit else Icons.Default.Visibility, 
+                        contentDescription = if (prompt.isDeletable) "Edit" else "View", 
+                        tint = Color.Gray, 
+                        modifier = Modifier.size(20.dp)
+                    ) 
+                }
+                if (prompt.isDeletable) {
+                    IconButton(onClick = { onDeletePrompt(prompt.id) }) { Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Gray, modifier = Modifier.size(20.dp)) }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Web Search", modifier = Modifier.weight(1f), color = Color.White)
+            Switch(checked = state.isWebSearchEnabled, onCheckedChange = onToggleWebSearch)
+        }
+
+        if (state.isWebSearchEnabled) {
+            Spacer(Modifier.height(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Search Engines", style = MaterialTheme.typography.labelLarge, color = purple, modifier = Modifier.weight(1f))
+                IconButton(onClick = onAddSearchEngine) { Icon(Icons.Default.Add, contentDescription = "Add search engine", tint = purple) }
+            }
+            state.searchEngines.forEach { engine ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onSelectSearchEngine(engine.id) }.padding(vertical = 4.dp)) {
+                    RadioButton(selected = state.selectedSearchEngineId == engine.id, onClick = { onSelectSearchEngine(engine.id) })
+                    Text(engine.name, color = if (state.selectedSearchEngineId == engine.id) Color.White else Color.Gray, modifier = Modifier.weight(1f))
+                    if (engine.isDeletable) {
+                        IconButton(onClick = { onRemoveSearchEngine(engine.id) }) { Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Gray, modifier = Modifier.size(20.dp)) }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Streaming", modifier = Modifier.weight(1f), color = Color.White)
+            Switch(checked = state.isStreamingEnabled, onCheckedChange = onToggleStreaming)
+        }
+        Spacer(Modifier.height(32.dp))
     }
 }
 

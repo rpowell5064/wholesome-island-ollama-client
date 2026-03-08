@@ -53,6 +53,26 @@ data class ChatUiMessage(
 )
 
 /**
+ * Represents a saved chat session.
+ */
+data class ChatContext(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "New Chat",
+    val messages: List<ChatUiMessage> = emptyList(),
+    val lastUpdated: Long = System.currentTimeMillis()
+)
+
+/**
+ * Represents a system prompt template.
+ */
+data class PromptConfig(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "New Prompt",
+    val content: String = ChatConstants.BASE_SYSTEM_PROMPT,
+    val isDeletable: Boolean = true
+)
+
+/**
  * Quick action buttons displayed above the input field.
  */
 data class QuickAction(
@@ -80,7 +100,7 @@ data class ChatUiState(
     val isServerHealthy: Boolean? = null,
     val isWebSearchEnabled: Boolean = true,
     val isStreamingEnabled: Boolean = true,
-    val verbosity: Float = 0.5f,
+    val verbosity: VerbosityLevel = VerbosityLevel.BALANCED,
     val infoMessage: String? = null,
     val error: String? = null,
     val attachedImagesBase64: List<String> = emptyList(),
@@ -90,7 +110,11 @@ data class ChatUiState(
         QuickAction("Simplify", "Explain simply.", "help")
     ),
     val discoveredIps: List<String> = emptyList(),
-    val isDiscovering: Boolean = false
+    val isDiscovering: Boolean = false,
+    val contexts: List<ChatContext> = emptyList(),
+    val currentContextId: String? = null,
+    val customPrompts: List<PromptConfig> = emptyList(),
+    val selectedPromptId: String? = null
 )
 
 /**
@@ -114,6 +138,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val searchEngineListAdapter = moshi.adapter<List<SearchEngineConfig>>(
         Types.newParameterizedType(List::class.java, SearchEngineConfig::class.java)
+    )
+    private val contextListAdapter = moshi.adapter<List<ChatContext>>(
+        Types.newParameterizedType(List::class.java, ChatContext::class.java)
+    )
+    private val promptListAdapter = moshi.adapter<List<PromptConfig>>(
+        Types.newParameterizedType(List::class.java, PromptConfig::class.java)
     )
     
     private var repository: OllamaRepository? = null
@@ -139,13 +169,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         selectedModel = prefs.getString("selected_model", null),
         isWebSearchEnabled = prefs.getBoolean("web_search_enabled", true),
         isStreamingEnabled = prefs.getBoolean("streaming_enabled", true),
-        verbosity = prefs.getFloat("verbosity", 0.5f)
+        verbosity = loadVerbosity(),
+        customPrompts = loadPrompts(),
+        selectedPromptId = prefs.getString("selected_prompt_id", "default_prompt")
     ))
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     private val searchRegex = Regex("""web_search\s*\(\s*(?:query\s*=\s*)?["'](.+?)["']\s*\)|\[SEARCH:\s*["'](.+?)["']\]|(?:tool_code|call|use|query|search|lookup)\s+web_search\s+query:?\s*["'](.+?)["']""", RegexOption.IGNORE_CASE)
 
     init {
+        val contexts = loadContexts()
+        val currentId = prefs.getString("current_context_id", null)
+        val initialContext = contexts.find { it.id == currentId } ?: contexts.firstOrNull()
+        
+        if (initialContext != null) {
+            _uiState.update { it.copy(
+                contexts = contexts,
+                currentContextId = initialContext.id,
+                messages = initialContext.messages
+            ) }
+        } else {
+            createNewChat()
+        }
+
         val url = _uiState.value.serverUrl
         val port = _uiState.value.serverPort
         val apiKey = _uiState.value.apiKey
@@ -153,6 +199,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             updateRepository(url, port, apiKey)
         } else {
             showStartupNotification()
+        }
+    }
+
+    private fun loadVerbosity(): VerbosityLevel {
+        val name = prefs.getString("verbosity_level", VerbosityLevel.BALANCED.name)
+        return try {
+            VerbosityLevel.valueOf(name!!)
+        } catch (e: Exception) {
+            VerbosityLevel.BALANCED
         }
     }
 
@@ -174,6 +229,137 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putString("search_engines_json", json).apply()
     }
 
+    private fun loadPrompts(): List<PromptConfig> {
+        val json = prefs.getString("custom_prompts_json", null)
+        val defaultList = listOf(PromptConfig(id = "default_prompt", name = "Default", content = ChatConstants.BASE_SYSTEM_PROMPT, isDeletable = false))
+        return if (json != null) {
+            try {
+                promptListAdapter.fromJson(json) ?: defaultList
+            } catch (e: Exception) {
+                defaultList
+            }
+        } else {
+            defaultList
+        }
+    }
+
+    private fun savePrompts(prompts: List<PromptConfig>) {
+        val json = promptListAdapter.toJson(prompts)
+        prefs.edit().putString("custom_prompts_json", json).apply()
+    }
+
+    fun addPrompt(name: String, content: String) {
+        val newPrompt = PromptConfig(name = name, content = content)
+        val newList = _uiState.value.customPrompts + newPrompt
+        _uiState.update { it.copy(customPrompts = newList) }
+        savePrompts(newList)
+    }
+
+    fun updatePrompt(id: String, name: String, content: String) {
+        val newList = _uiState.value.customPrompts.map {
+            if (it.id == id) it.copy(name = name, content = content) else it
+        }
+        _uiState.update { it.copy(customPrompts = newList) }
+        savePrompts(newList)
+    }
+
+    fun deletePrompt(id: String) {
+        val prompt = _uiState.value.customPrompts.find { it.id == id }
+        if (prompt?.isDeletable == false) return
+
+        val newList = _uiState.value.customPrompts.filter { it.id != id }
+        var newSelectedId = _uiState.value.selectedPromptId
+        if (newSelectedId == id) {
+            newSelectedId = "default_prompt"
+        }
+        _uiState.update { it.copy(customPrompts = newList, selectedPromptId = newSelectedId) }
+        savePrompts(newList)
+        prefs.edit().putString("selected_prompt_id", newSelectedId).apply()
+    }
+
+    fun setSelectedPrompt(id: String) {
+        prefs.edit().putString("selected_prompt_id", id).apply()
+        _uiState.update { it.copy(selectedPromptId = id) }
+    }
+
+    private fun loadContexts(): List<ChatContext> {
+        val json = prefs.getString("chat_contexts_json", null)
+        return if (json != null) {
+            try {
+                contextListAdapter.fromJson(json) ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        } else {
+            emptyList()
+        }
+    }
+
+    private fun saveContexts() {
+        val state = _uiState.value
+        val currentId = state.currentContextId ?: return
+        
+        val updatedContexts = state.contexts.map {
+            if (it.id == currentId) {
+                it.copy(messages = state.messages, lastUpdated = System.currentTimeMillis(), name = deriveChatName(state.messages))
+            } else {
+                it
+            }
+        }.toMutableList()
+
+        if (updatedContexts.none { it.id == currentId }) {
+            updatedContexts.add(ChatContext(id = currentId, messages = state.messages, name = deriveChatName(state.messages)))
+        }
+
+        val json = contextListAdapter.toJson(updatedContexts)
+        prefs.edit().putString("chat_contexts_json", json).apply()
+        _uiState.update { it.copy(contexts = updatedContexts) }
+    }
+
+    private fun deriveChatName(messages: List<ChatUiMessage>): String {
+        val firstUserMsg = messages.find { it.role == "user" }?.text ?: "New Chat"
+        return if (firstUserMsg.length > 30) firstUserMsg.take(27) + "..." else firstUserMsg
+    }
+
+    fun createNewChat() {
+        if (_uiState.value.messages.isNotEmpty()) {
+            saveContexts()
+        }
+        val newContext = ChatContext()
+        _uiState.update { it.copy(
+            messages = emptyList(),
+            currentContextId = newContext.id,
+            contexts = it.contexts + newContext
+        ) }
+        prefs.edit().putString("current_context_id", newContext.id).apply()
+        saveContexts()
+    }
+
+    fun selectContext(id: String) {
+        saveContexts()
+        val context = _uiState.value.contexts.find { it.id == id } ?: return
+        _uiState.update { it.copy(
+            messages = context.messages,
+            currentContextId = id
+        ) }
+        prefs.edit().putString("current_context_id", id).apply()
+    }
+
+    fun deleteContext(id: String) {
+        val newList = _uiState.value.contexts.filter { it.id != id }
+        _uiState.update { it.copy(contexts = newList) }
+        if (_uiState.value.currentContextId == id) {
+            if (newList.isNotEmpty()) {
+                selectContext(newList.first().id)
+            } else {
+                createNewChat()
+            }
+        } else {
+            val json = contextListAdapter.toJson(newList)
+            prefs.edit().putString("chat_contexts_json", json).apply()
+        }
+    }
+
     private fun showStartupNotification() {
         val state = _uiState.value
         when {
@@ -181,7 +367,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(infoMessage = "Welcome! Please enter your Ollama server address in settings.") }
             }
             state.isServerHealthy == true && (state.selectedModel == null || state.availableModels.isEmpty()) -> {
-                _uiState.update { it.copy(infoMessage = "Server connected! Now select a model in settings to start.") }
+                _uiState.update { it.copy(infoMessage = "Server connected! Now select a model to start.") }
             }
             state.isServerHealthy == true -> {
                 _uiState.update { it.copy(infoMessage = "Ready to chat.") }
@@ -208,7 +394,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             "http://$trimmedUrl"
         }
 
-        // Check if there is already a port (look for colon after the protocol)
         val protocolEndIndex = baseWithProtocol.indexOf("://") + 3
         val hasExplicitPort = baseWithProtocol.indexOf(":", protocolEndIndex) != -1
 
@@ -256,8 +441,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val interfaces = java.util.Collections.list(java.net.NetworkInterface.getNetworkInterfaces())
             for (iface in interfaces) {
                 if (iface.isLoopback || !iface.isUp) continue
-                
-                // Prefer Wi-Fi or Ethernet interfaces
                 val name = iface.name.lowercase(Locale.US)
                 if (name.contains("wlan") || name.contains("eth") || name.contains("en")) {
                     val addresses = java.util.Collections.list(iface.inetAddresses)
@@ -268,7 +451,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
-            // Fallback: just find the first non-loopback IPv4
             for (iface in interfaces) {
                 if (iface.isLoopback || !iface.isUp) continue
                 val addresses = java.util.Collections.list(iface.inetAddresses)
@@ -290,28 +472,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(isDiscovering = true, discoveredIps = emptyList(), error = null) }
             }
 
-            // Limit to 15 concurrent socket attempts to prevent OS-level crashes
             val semaphore = Semaphore(15)
 
             try {
                 val ip = getLocalIPAddress()
                 if (ip == null || !ip.contains(".")) {
-                    // ... same error handling as before ...
                     return@launch
                 }
 
                 val prefix = ip.substring(0, ip.lastIndexOf(".") + 1)
                 val discovered = mutableListOf<String>()
 
-                // Create all 254 tasks
                 val jobs = (1..254).map { j ->
                     async {
-                        semaphore.withPermit { // Wait for a free slot
+                        semaphore.withPermit { 
                             val targetIp = prefix + j
                             if (targetIp == ip) return@async null
                             try {
                                 val socket = Socket()
-                                // Shorter timeout (500ms) is usually enough for local LAN
                                 socket.connect(InetSocketAddress(targetIp, 11434), 500)
                                 socket.close()
                                 targetIp
@@ -322,7 +500,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // Wait for results and update UI as they come in
                 jobs.forEach { job ->
                     val result = job.await()
                     if (result != null) {
@@ -338,7 +515,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
             } catch (e: Exception) {
-                // ... error handling ...
             } finally {
                 withContext(Dispatchers.Main) {
                     _uiState.update { it.copy(isDiscovering = false) }
@@ -391,9 +567,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(isStreamingEnabled = enabled) }
     }
 
-    fun setVerbosity(value: Float) {
-        prefs.edit().putFloat("verbosity", value).apply()
-        _uiState.update { it.copy(verbosity = value) }
+    fun setVerbosity(level: VerbosityLevel) {
+        prefs.edit().putString("verbosity_level", level.name).apply()
+        _uiState.update { it.copy(verbosity = level) }
     }
 
     private fun checkHealthAndLoadModels(port: String) {
@@ -468,10 +644,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearMessages() {
         _uiState.update { it.copy(messages = emptyList(), error = null) }
+        saveContexts()
     }
 
     fun deleteMessage(id: Long) {
         _uiState.update { it.copy(messages = it.messages.filter { it.id != id }) }
+        saveContexts()
     }
 
     fun dismissError() {
@@ -498,6 +676,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         activeChatJob?.cancel()
         activeChatJob = null
         _uiState.update { it.copy(isLoading = false, isSearching = false, searchQuery = null, progressMessage = ChatConstants.IDLE_PROGRESS) }
+        saveContexts()
     }
 
     private suspend fun processSearchResponse(rawBody: String): String {
@@ -552,9 +731,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 "API_GET" -> {
                     val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-                    var finalUrl = engine.url.replace("?", "&") // Normalize to avoid double '?'
-                    
-                    // Re-insert the first '?' correctly
+                    var finalUrl = engine.url.replace("?", "&") 
                     if (finalUrl.contains("&")) {
                         finalUrl = finalUrl.replaceFirst("&", "?")
                     } else if (!finalUrl.contains("?")) {
@@ -638,14 +815,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun sendMessage(text: String) {
         val state = _uiState.value
         val model = state.selectedModel ?: run {
-            setError("No model selected. Please select one in settings.")
+            setError("No model selected. Please select one.")
             return
         }
         val newUserMessage = ChatUiMessage(idGenerator.incrementAndGet(), "user", text, imagesBase64 = state.attachedImagesBase64)
         val currentDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        
+        val selectedPrompt = state.customPrompts.find { it.id == state.selectedPromptId }?.content ?: ChatConstants.BASE_SYSTEM_PROMPT
+        
         val systemContent = buildString {
             append("TODAY'S DATE: $currentDate\n\n")
-            append(ChatConstants.BASE_SYSTEM_PROMPT)
+            append(selectedPrompt)
+            append("\n\nVERBOSITY INSTRUCTION: ${state.verbosity.instruction}")
             if (state.isWebSearchEnabled) {
                 append("\n\n")
                 append(ChatConstants.WEB_SEARCH_INSTRUCTION)
@@ -658,22 +839,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         history.add(ChatMessage(role = "system", content = systemContent))
         
         val imageCutoff = state.messages.size - 2
-        val recentMessages = if (state.messages.size > 4) state.messages.takeLast(4) else state.messages
+        val recentMessages = if (state.messages.size > 10) state.messages.takeLast(10) else state.messages
         
         recentMessages.forEachIndexed { index, msg -> 
-            val totalIndex = if (state.messages.size > 4) (state.messages.size - 4) + index else index
+            val totalIndex = if (state.messages.size > 10) (state.messages.size - 10) + index else index
             history.add(ChatMessage(
                 role = msg.role, 
-                content = msg.text.take(1000), 
-                reasoningContent = msg.reasoning?.take(500), 
+                content = msg.text.take(2000), 
+                reasoningContent = msg.reasoning?.take(1000), 
                 images = if (totalIndex >= imageCutoff) msg.imagesBase64.ifEmpty { null } else null, 
                 toolCalls = msg.toolCalls
             ))
         }
         
-        history.add(ChatMessage("user", text.take(1500), null, state.attachedImagesBase64.ifEmpty { null }, null, null))
+        history.add(ChatMessage("user", text.take(2000), null, state.attachedImagesBase64.ifEmpty { null }, null, null))
 
         _uiState.update { it.copy(messages = it.messages + newUserMessage, isLoading = true, progressMessage = ChatConstants.IDLE_PROGRESS, error = null, attachedImagesBase64 = emptyList()) }
+        saveContexts()
         performSendMessage(model, history, state.isWebSearchEnabled, state.isStreamingEnabled)
     }
 
@@ -707,6 +889,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             }
                             setError(err)
                             _uiState.update { it.copy(isLoading = false) }
+                            saveContexts()
                             return@launch
                         }
 
@@ -739,6 +922,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                     }
                                 }
                             _uiState.update { it.copy(isLoading = false) }
+                            saveContexts()
                         } catch (e: ToolCallHandledException) {
                             _uiState.update { it.copy(messages = it.messages.filter { it.id != msgId }) }
                             val searchResult = performWebSearch(e.query)
@@ -758,6 +942,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         if (!response.isSuccessful) {
                             setError(response.errorBody()?.string()?.take(300) ?: "HTTP ${response.code()}")
                             _uiState.update { it.copy(isLoading = false) }
+                            saveContexts()
                             return@launch
                         }
                         val assistantMsg = response.body()?.message ?: return@launch
@@ -785,12 +970,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         } else {
                             val msgId = idGenerator.incrementAndGet()
                             _uiState.update { it.copy(messages = it.messages + ChatUiMessage(msgId, "assistant", text, reasoning.ifEmpty { null }), isLoading = false) }
+                            saveContexts()
                         }
                     }
                 } catch (e: Exception) {
                     if (e !is CancellationException) {
                         setError(e.localizedMessage ?: e.message)
                         _uiState.update { it.copy(isLoading = false) }
+                        saveContexts()
                     }
                     return@launch
                 }
